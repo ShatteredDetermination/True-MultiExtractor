@@ -5,6 +5,18 @@
 本仓库只放**源码**；编译版在 [Releases](../../releases) 里。第三方 CLI（UTMT /
 AssetStudio / evbunpack / repak，约 178 MB）不进 git，用 `tools/setup_tools.py` 自行下载。
 
+## 下载编译版
+
+| 版本 | 编译版 | 说明 |
+|---|---|---|
+| **0.17R** | `MultiExtractor-0.17R-win64.zip`（137 MB） | 最新发布：GUI + CLI 同级、.NET 10 单文件壳 |
+| 0.15 | `MultiExtractor_0.15.zip`（91 MB） | 单文件 CLI |
+| 0.14 | `MultiExtractor_0.14.zip`（29 MB） | 单文件 CLI |
+| 0.13 | `MultiExtractor_0.13.zip`（91 MB） | 单文件 CLI |
+| 0.12 | `MultiExtractor_0.12.zip`（91 MB） | 单文件 CLI |
+
+0.10 / 0.11 / 0.12b / 0.16 只有源码存档（当年未打 exe 包），用对应 tag 检出后自行打包。
+
 ## 版本线
 
 目录 `Ver 0.10` … `Ver 0.17` 是逐版本留档，每个目录是一份完整可运行的源码树。
