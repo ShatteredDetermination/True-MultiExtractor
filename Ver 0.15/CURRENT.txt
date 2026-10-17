@@ -1,0 +1,25 @@
+True MultiExtractTool —— 0.13（主线版本）
+==========================================
+
+这是当前推荐的版本。
+
+版本关系：
+    Ver 0.10   最早的存档
+    Ver 0.11   重命名运行时目录、加 setup.ini
+    Ver 0.14   主线 —— 自研 data.win 解析器；去掉 UTMT 与 GPL 依赖；实验性重建留给 0.15
+Ver 0.12   主线 —— 直接读 data.win、GameMaker 两层兜底（UTMT → 修补）
+    Ver 0.13   本版本 —— 在 0.12 基础上加 GUI 调用接口
+    Ver 0.12b  废弃 —— 0.12 之上试了一层实验性指针重建，没做成，存档留念
+
+0.13 相对 0.12 只有新增，没有改动既有行为：
+    me/events.py        NDJSON 事件流（--json 打开，不开就是空操作）
+    me/ui.py            输出镜像成 note 事件
+    me/runner.py        发 detect / stage / result 事件，加取消点
+    me/tools/stream.py  外部 CLI 运行期间响应取消
+    main.py             --json / --cancel-file / --categories / --version，固定退出码
+    GUI-API.md          给 WinForms 壳的接口契约
+
+不带参数的 0.13 与 0.12 行为一致：双击仍是交互式 CLI。
+
+Ver 0.12b 里那个重建模块的思路是有效的（拿 UTMT 的报错当预言机反推越界指针），
+但那个文件修完指针后仍然读不通，详见 Ver 0.12b\DEPRECATED.txt 和 FORMATS.md 3.3。
