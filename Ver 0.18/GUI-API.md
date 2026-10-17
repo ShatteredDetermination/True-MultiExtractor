@@ -433,6 +433,11 @@ daemon.bat → 等 2 秒 → tar 解压覆盖 → 删包 → start 新 CLI → �
 2. 退出码 `0` 不代表「更新完成」，只代表「已交接」；真正完成以文件被覆盖为准；
 3. 重启后的新进程需要壳重新 locate CLI（版本可能变了，`version.ini` 会更新）。
 
+更新包是 `make_dist.py --pack` 打出来的 `UpdatePack.zip`：28 个条目**全部在根层**
+（`MultiExtractorCLI.exe`、`MultiExtractorGUI.exe`、`resources\…`），因为
+`daemon.bat` 只有 `tar -xf "UpdatePack.zip" -C "%~dp0."` 一句、没有
+`--strip-components`。带一层 `MultiExtractor-0.18R-win64\` 的手动安装包不能顶替它。
+
 ## 9. 壳的分发与 CLI 定位（V0.17）
 
 壳（MultiExtractorGUI）从 V0.17 起是 **.NET 10 自包含单文件 exe**（约 47 MB），

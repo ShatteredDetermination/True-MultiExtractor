@@ -5,6 +5,7 @@
     python make_dist.py                     # 用默认 GUI 路径组装 + 压 zip
     python make_dist.py --gui "D:\\壳\\MultiExtractorGUI.exe"
     python make_dist.py --skip-cli          # CLI 已经打好了，只组装
+    python make_dist.py --skip-cli --pack   # 顺手打在线更新包 dist/UpdatePack.zip
     python make_dist.py --check             # 只检查已有产物是否合规
 
 产物结构（默认「同级平铺」：CLI 与壳放在同一个目录，壳优先看同级）::
@@ -38,6 +39,7 @@ make_release.py 会清掉 dist/ 和 build_exe/（它们都是产物目录），�
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -194,6 +196,43 @@ def make_zip(pkg: Path) -> Path:
     return out
 
 
+def make_update_pack(pkg: Path, out: Path) -> Path:
+    """更新包：条目在**根层平铺**，给 `--update` 的 daemon.bat 解压用。
+
+    daemon.bat 只有一句 `tar -xf "UpdatePack.zip" -C "%~dp0."`，没有
+    `--strip-components`。所以包里不能像成品 zip 那样带一层
+    `MultiExtractor-0.18R-win64/`：那样解完只在程序旁边多一个子目录，
+    一个文件都换不掉，用户看到的就是「更新完了版本号没变」。
+
+    平铺之后 tar 直接把文件铺到程序根，同名覆盖。
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
+    t0 = time.time()
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED,
+                         compresslevel=ZIP_LEVEL) as zf:
+        for f in sorted(pkg.rglob("*")):
+            if f.is_file():
+                zf.write(f, f.relative_to(pkg).as_posix())
+                n += 1
+    log(f"更新包：{n} 个文件，{out.stat().st_size / 1024 / 1024:.1f} MB，"
+        f"{time.time() - t0:.1f}s")
+    return out
+
+
+def sha256_file(path: Path, chunk: int = 1 << 18) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            block = fh.read(chunk)
+            if not block:
+                break
+            h.update(block)
+    return h.hexdigest()
+
+
 def dir_stats(path: Path):
     n = 0
     total = 0
@@ -214,6 +253,10 @@ def main() -> int:
     ap.add_argument("--skip-cli", action="store_true",
                     help="不重新打 CLI，直接用已有产物")
     ap.add_argument("--no-zip", action="store_true", help="不压 zip")
+    ap.add_argument("--pack", nargs="?", const="", default=None,
+                    metavar="PATH",
+                    help="另外打一个在线更新包（根层平铺，供 --update 用；"
+                         "默认 dist/UpdatePack.zip），并打印 sha256")
     ap.add_argument("--layout", choices=("flat", "subdir"), default="flat",
                     help="flat = CLI 与壳同级（默认，壳优先看同级）；"
                          "subdir = CLI 放 cli\\ 子目录")
@@ -250,6 +293,11 @@ def main() -> int:
 
     if not args.no_zip:
         log(f"成品 zip：{make_zip(pkg)}")
+    if args.pack is not None:
+        pack = Path(args.pack) if args.pack else out_dir / "UpdatePack.zip"
+        pack = make_update_pack(pkg, pack)
+        log(f"更新包路径：{pack}")
+        log(f"更新包 sha256：{sha256_file(pack)}")
     return 0
 
 

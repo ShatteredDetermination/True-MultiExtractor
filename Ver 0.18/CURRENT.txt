@@ -1090,3 +1090,82 @@ GUI：右侧日志加时间戳 [yyyy-mm-dd hh:mm:ss]
 按「Beta 版本号忽略版本号不动原则」提升一次，0.18E 保持不变。
 重建：build_exe.py --zip -> dotnet publish -c Release -> make_dist.py --skip-cli。
 自测：全量 ME_NO_NET=1 python selftest/run_all.py -> 35/35 通过。
+
+------------------------------------------------------------------------------
+发行：V0.18R（0.18E Beta 00098 -> 0.18R Beta 00098）
+------------------------------------------------------------------------------
+用户指示：「准备发行。发布V0.18」。
+
+按版本号规则把后缀从 E 翻成 R（`python bump.py --tag R`，编号不动），
+0.18 这条线从此是**已发布**态：
+
+    True MultiExtractTool v0.18R Beta 00098
+
+资产（GitHub Release `v0.18R`）：
+
+| 资产 | 字节 | sha256 |
+|---|---|---|
+| MultiExtractor-0.18R-win64.zip | 53,805,473 | cc0d40a0f08ea9a1711bee6be44fda2288359b25acea5c350035e430193eb416 |
+| UpdatePack.zip | 53,803,961 | 1ba49d2f9711753b1e648ce89fc40cb31f613e51be42841dc1c386aca34ebd3d |
+
+两个包内容一致（28 个文件 / 67.3 MB 展开），区别只在**压缩包的目录层级**：
+
+  * `MultiExtractor-0.18R-win64.zip` 顶层带 `MultiExtractor-0.18R-win64/`，
+    给用户手动解压；
+  * `UpdatePack.zip` 28 个条目**全部在根层**，给 `--update` 的 daemon.bat。
+
+为什么必须区分：daemon.bat 只有一句
+  tar -xf "UpdatePack.zip" -C "%~dp0."
+没有 `--strip-components`。把带子目录的手动包当更新包发下去，解完只在程序
+旁边多一个 `MultiExtractor-0.18R-win64\` 目录，一个文件都换不掉 —— 用户
+看到的就是「更新成功但版本号没变」。V0.17R 的资产是 143,868,674 B 的
+`MultiExtractor_0.17R.zip`，同样的问题一直存在，这版修掉。
+
+新增：make_dist.py --pack
+  * 组装完顺手打 `dist/UpdatePack.zip`（根层平铺），并打印它的 sha256，
+    正好抄进 version.json，不用再去算一遍；
+  * 实测：tar -xf 解到一个空目录 -> 28 个文件全在根层，直接跑里面的
+    MultiExtractorCLI.exe：--version 回 0.18R Beta 00098（rc 0）、
+    --engines rc 0、--tools rc 4 且带「全量包」与「--tools-get」提示
+    （Slim 缺工具是预期）。
+
+version.json（仓库根，更新器远端清单）：
+
+    latest_stable = "0.18R"
+    latest_beta   = ""           这一线已经发布，等 0.19E 再填
+    download_url  = .../releases/download/v0.18R/UpdatePack.zip
+    sha256        = 1ba49d2f9711753b1e648ce89fc40cb31f613e51be42841dc1c386aca34ebd3d
+    changelog     = 0.18R 一句话摘要
+    _note         解释 sha256 是哪个文件的、以及更新包必须根层平铺
+
+实测更新器判定（把本地版本假装成旧版跑 me.update.plan）：
+  本机 0.17R  -> 远端 0.18R，available=True，「远端稳定版更高」
+  本机 0.18E  -> 不自动提示（同一条线只换后缀，规则如此），
+                 要显式 --update verid=0.18R（same_line_better 判 True）
+  本机 0.18R  -> 已是最新
+
+文档同步：
+  * README / CLI-ARGS：version.json 样例改成 0.18R + UpdatePack.zip，
+    并写明「更新包必须根层平铺」与 --update verid=0.18R 的用法；
+  * GUI-API 第 10 节补同样一段（壳的开发者也别拿手动包当更新包）；
+  * ROADMAP：V0.18E 段改成「V0.18R（已发布）」，附两个资产的用途表；
+  * README 归档树：Ver 0.18 标注「0.18R 发行见 GitHub Release」。
+
+构建链（顺序不能反，make_release 会清 dist/）：
+  python make_release.py --zip            # 源码包 91,904,912 B（581 文件）
+  python build_exe.py --zip               # dist/MultiExtractor + MultiExtractor_0.18R.zip
+  dotnet publish -c Release               # 壳单文件 49,355,914 B
+  python make_dist.py --skip-cli --pack   # 发布目录 + 成品 zip + UpdatePack.zip
+
+构建时踩到的一个坑：本机 `%LOCALAPPDATA%\MultiExtractor\toolsdir.ini` 记着
+开发目录的 tools/（GUI「扫描本机」写进去的），build_exe 的冒烟自测因此认为
+「4 个工具都装好了」，而 Slim 的断言要求「一个都没装 + 打出全量包地址」，
+于是报「--tools 没给出全量包地址」。发行构建前把 toolsdir.ini 临时改名，
+构建完再改回来即可 —— 不是代码问题，是这台机器的状态。
+
+自测里跟着改的一处：test_update 的「本机是公测版」两条断言原本依赖开发目录
+当前的标签（当时是 0.18E）。翻成 0.18R 之后 is_stable(local) 成立、
+same_line_better 也不再成立，两条断言失真。改成在测试里把本机版本钉死成
+0.18E Beta 00090（upd.local_version 打桩），断言与当前标签彻底解耦。
+
+自测：全量 35/35 通过（含 test_update 9.7s、test_samples 89.3s）。

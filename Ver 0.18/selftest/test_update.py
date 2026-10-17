@@ -219,12 +219,19 @@ def test_choose():
         "latest_stable": "0.19R", "latest_beta": "0.20E",
         "download_url": "https://x/p.zip", "sha256": "aa"}))
 
-    ver, why = upd.choose(info)
-    check(ver == "0.20E", f"本机 0.18E 时选更高的公测版（{ver} {why}）")
+    # 这一段验的是「本机跑的是公测版」时的行为，所以把本机版本钉死成 0.18E
+    # —— 不然开发目录翻成 0.18R（发行版）之后这几条断言会跟着变味。
+    old_local = upd.local_version
+    upd.local_version = lambda: "0.18E Beta 00090"
+    try:
+        ver, why = upd.choose(info)
+        check(ver == "0.20E", f"本机 0.18E 时选更高的公测版（{ver} {why}）")
 
-    p = upd.plan(info)
-    check(p["available"] is True, "plan.available")
-    check(p["beta_available"] is False, "本机是公测版时不再提示「有公测版」")
+        p = upd.plan(info)
+        check(p["available"] is True, "plan.available")
+        check(p["beta_available"] is False, "本机是公测版时不再提示「有公测版」")
+    finally:
+        upd.local_version = old_local
 
     # 本机稳定版 + 远端有公测版 -> 提示公测版
     old_local = upd.local_version
@@ -246,7 +253,14 @@ def test_choose():
     same = upd.parse(json.dumps({"latest_stable": "0.18R", "latest_beta": "0.18E"}))
     p_same = upd.plan(same)
     check(p_same["available"] is False, "同一条版本线不自动催更新", str(p_same))
-    p_point = upd.plan(same, "verid=0.18R")
+
+    # 同线换后缀只在 verid= 明确点名时放行：本机 0.18E -> 0.18R
+    old_local = upd.local_version
+    upd.local_version = lambda: "0.18E Beta 00090"
+    try:
+        p_point = upd.plan(same, "verid=0.18R")
+    finally:
+        upd.local_version = old_local
     check(p_point["available"] is True, "verid=0.18R 明确点名才允许同线换后缀",
           str(p_point))
 

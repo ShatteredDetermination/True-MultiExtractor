@@ -1,10 +1,21 @@
 # 路线图
 
-## V0.18E（开发中，标签 0.18E Beta 00096）：Slim 微内核 → 软键预览
+## V0.18R（已发布，标签 0.18R Beta 00098）：Slim 微内核 → 软键预览
 
 **用户指示（原话）**：「V0.18E 需要高度模块化。」分两阶段做，阶段二遇到
 底层阻塞就回滚到阶段一；**不越界去改底层 AST / 解析核心**，重点在外围的
 交互、容错与分发逻辑。
+
+**发行**：`python bump.py --tag R` 把 `0.18E` 翻成 `0.18R`（编号继续累加，
+本版 `0.18R Beta 00098`）。GitHub Release `v0.18R` 带两个资产：
+
+| 资产 | 用途 |
+|---|---|
+| `MultiExtractor-0.18R-win64.zip` | 手动安装包，解压得到一个 `MultiExtractor-0.18R-win64\` 目录 |
+| `UpdatePack.zip` | 在线更新包，**根层平铺**，`--update` 的 `daemon.bat` 直接解到程序根 |
+
+`version.json` 的 `download_url` 指向 `UpdatePack.zip`，`sha256` 是那个文件的；
+`latest_stable` = `0.18R`，`latest_beta` 留空（这一线已经发布，等 0.19E 再填）。
 
 ### 阶段一（已完成）：Slim 微内核
 
@@ -41,7 +52,8 @@
 - 取消协议补「杀子进程树」，避免外部 CLI 变孤儿；
 - `test_samples.py` 增加样本覆盖前先确认样本来源与授权。
 
-开发期间对外报 `0.18E`，验收通过后 `python bump.py --tag R` 翻成 `0.18R`。
+已按计划把后缀从 `0.18E` 翻成 `0.18R`（`python bump.py --tag R`，编号不变），
+发行见本节开头。下一线 `0.19` 开工时用 `python bump.py --line 0.19 --tag WIP`。
 
 ## V0.17R（已发布）：自研 / 第三方两条通道
 

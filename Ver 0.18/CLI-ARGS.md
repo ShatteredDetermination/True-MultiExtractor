@@ -97,6 +97,7 @@ V0.18E 起发布包是 **Slim**：不带 `tools/` 那 178 MB 外部 CLI。缺的
 ```bat
 MultiExtractorCLI.exe --update                 :: 自动选（有更高的公测版就提示公测版）
 MultiExtractorCLI.exe --update verid=0.18E     :: 点名要这个版本
+MultiExtractorCLI.exe --update verid=0.18R     :: 同一条线换后缀（0.18E -> 0.18R）
 MultiExtractorCLI.exe --update beta            :: 只要公测通道
 MultiExtractorCLI.exe --update stable          :: 只要稳定通道
 MultiExtractorCLI.exe --update -y              :: 不询问，直接装
@@ -106,13 +107,17 @@ MultiExtractorCLI.exe --update -y              :: 不询问，直接装
 
 ```json
 {
-  "latest_stable": "0.17R",
-  "latest_beta": "0.18E",
-  "download_url": "https://.../UpdatePack.zip",
+  "latest_stable": "0.18R",
+  "latest_beta": "",
+  "download_url": "https://.../releases/download/v0.18R/UpdatePack.zip",
   "sha256": "abcd...",
   "changelog": "修复了..."
 }
 ```
+
+`download_url` 必须是**根层平铺**的更新包（`make_dist.py --pack` 的产物）：`daemon.bat`
+用 `tar -xf "UpdatePack.zip" -C "%~dp0."` 解压，没有 `--strip-components`，
+包里多一层 `MultiExtractor-0.18R-win64/` 就一个文件都换不掉。
 
 **版本比较规则**：剥离 `E / Rc / S / WIP` 后缀，**只比主版本号**
 （`0.18E` 与 `0.18R` 视为同一版，不会互相催更新）。

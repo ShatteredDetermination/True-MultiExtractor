@@ -134,19 +134,25 @@ MultiExtractorCLI.exe "D:\Games\SomeGame" --keep-work
 ```bat
 MultiExtractorCLI.exe --update          :: 查更新（有更高的公测版会先问一句）
 MultiExtractorCLI.exe --update -y       :: 不问，直接装
+MultiExtractorCLI.exe --update verid=0.18R   :: 同一条线换后缀（0.18E -> 0.18R）要点名
 ```
 
 远端清单是仓库根目录的 `version.json`：
 
 ```json
 {
-  "latest_stable": "0.17R",
-  "latest_beta": "0.18E",
-  "download_url": "https://.../UpdatePack.zip",
+  "latest_stable": "0.18R",
+  "latest_beta": "",
+  "download_url": "https://.../releases/download/v0.18R/UpdatePack.zip",
   "sha256": "abcd...",
   "changelog": "修复了..."
 }
 ```
+
+`download_url` 必须指向**根层平铺**的更新包（`UpdatePack.zip`）：`daemon.bat` 只有
+一句 `tar -xf "UpdatePack.zip" -C "%~dp0."`，没有 `--strip-components`，包里带
+`MultiExtractor-0.18R-win64/` 这一层的话解完只多一个子目录，一个文件都换不掉。
+`make_dist.py --pack` 打的就是这种包。
 
 * **只比主版本号**：`E / Rc / S / WIP` 后缀在比较时剥掉，`0.18E` 与 `0.18R` 视为同一版；
   同一条线要换后缀得写 `--update verid=0.18R`。
@@ -458,7 +464,7 @@ C:\MultiExtractor\
 ├── Source Code\
 │   ├── Ver 0.16\           已发布版（= 原 0.15E，全量重建）
 │   ├── Ver 0.17\           已发布（0.17R）
-│   └── Ver 0.18\           已归档（0.18E 阶段的快照）
+│   └── Ver 0.18\           已归档（0.18E 阶段的快照；0.18R 发行见 GitHub Release）
 └── Compiled\
     ├── Ver 0.15\           最后一个用 python312 打出来的 exe 包
     └── Ver 0.17\           0.17R 的 exe 包（PyInstaller 6.22.3 / Python 3.14）
