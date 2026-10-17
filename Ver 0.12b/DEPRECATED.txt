@@ -1,0 +1,59 @@
+True MultiExtractTool —— 0.12b（废弃版）
+=========================================
+
+这个目录原先是 V0.13，现改名为 V0.12b 作为**废弃版存档**。
+
+日常请用 Ver 0.12 —— 那个才是主线。
+
+它比 0.12 多了什么
+------------------
+一层「实验性」的 data.win 指针重建（me/formats/gamemaker_rebuild.py）。
+
+思路是成立的：UTMT 要求列表条目严格连续，不连续就报
+
+    Reading misaligned at <条目应该开始的位置>, realigning back to <指针里写的值>
+
+而这行报错恰好把**正确位置**说了出来。于是拿 UTMT 当**预言机**，一轮修一个
+越界指针，迭代到指针表连续。全程不改文件长度（文件里存绝对偏移，一变全错位）。
+
+实测在 Downloads\data.win（61MB）上 6 轮全部反推成功，FONT 20/20 落在 chunk 内、
+严格递增，而且反推值和原本存活的合法指针完全自洽 —— 是真算对了，不是恰好通过。
+
+为什么废弃
+----------
+**它修不完。** 修好 FONT 指针之后，那个文件仍然死在
+
+    Padding error in STRG
+
+STRG 的声明长度比实际内容长 278,465 字节（多出来的就是那 6 个被挪走的字体条目）。
+要修只能缩短 STRG，但那样 TXTR / AUDO 全体前移，文件里所有大于该位置的绝对偏移
+都得减掉同一个差值 —— 需要全局偏移重写器，没实现。
+
+而且这一层**默认就是关闭的**（要 ME_EXPERIMENTAL_REBUILD=1 才跑），对 0.12 的
+日常使用没有任何增强，只多了一个不保证成功的分支。所以从主线挪出来存个档。
+
+另外还留着一个已知的坑：新版 GameMaker 里 `VARI` / `FUNC` / `LANG` 不是
+「count + 绝对指针」这个布局，诊断靠「指针不到一半合理就认为读错布局」的
+保守判据绕开了它，但这终究是猜的。
+
+要试的话
+--------
+    set ME_EXPERIMENTAL_REBUILD=1
+    MultiExtractor.exe "D:\Games\X\data.win"
+
+或者单独跑那个模块（不依赖主程序）：
+
+    python me\formats\gamemaker_rebuild.py "...\data.win" --diagnose-only
+    python me\formats\gamemaker_rebuild.py "...\data.win" -o rebuilt.win
+
+和 Ver 0.12 的差别
+------------------
+    me/formats/gamemaker_rebuild.py     新增（实验性）
+    me/engines/gamemaker.py             多一层按 ME_EXPERIMENTAL_REBUILD 开关的调用
+    selftest/test_gamemaker_rebuild.py  新增 28 项自测（用假预言机，不依赖 UTMT）
+    README.md                           补了实验性功能的说明
+    FORMATS.md                          补了 3.3 节（预言机反推的完整记录）
+    me/config.py                        版本号 0.12b
+
+除此之外与 Ver 0.12 完全一致 —— 默认行为（UTMT → 修补 → 抓取三层）没有改动，
+实测输出仍是 257 个文件（32 张纹理页 + 225 个音频）。
