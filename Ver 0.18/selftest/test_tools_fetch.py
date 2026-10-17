@@ -18,8 +18,10 @@
     python selftest/test_tools_fetch.py
 """
 
+import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -330,6 +332,62 @@ def main() -> int:
         res5 = fetch.install(["nosuchtool"])
         check(isinstance(res5, tuple) and len(res5) == 2,
               "install 永远返回 (results, used_package)")
+
+        # ---------------------------------------------------------- 进度事件
+        # 用户的现场：GUI 里下工具时进度条一直 0，标题变成「未回报进度」。
+        # 下载器本来就是 Python 的，问题在于「一个字节都没到」时没有任何事件。
+        # 这里用 file:// 冒充 GitHub，跑真的 main.py，验事件流。
+        section("8. --tools-get --json：进度事件与 tool_get 都发得出来")
+
+        cli_tools = tmp / "cli-tools"
+        cli_tools.mkdir(parents=True, exist_ok=True)
+        remote = make_zip(tmp / "remote" / "utmt.zip",
+                          {"UTMT_CLI/UndertaleModCli.exe": b"MZ" + b"\x00" * 4096})
+        ini = tmp / "remote" / "tools.ini"
+        ini.write_text(
+            "[meta]\nversion = 9\nupdated = 2026-10-17\nfull_package =\n\n"
+            "[utmt]\nname = UTMT\nkind = cli\nnote = test\n"
+            "paths = utmt/UndertaleModCli.exe\n"
+            f"url = {remote.as_uri()}\n",
+            encoding="utf-8")
+
+        # 清单走「本地缓存」这一层：ME_NO_NET=1 不会去拉远端，
+        # 而缓存是同步可读的，测试不依赖线程时序
+        cache_dir = tmp / "localappdata" / "MultiExtractor"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "tools.ini").write_text(ini.read_text(encoding="utf-8"),
+                                             encoding="utf-8")
+
+        env = dict(os.environ)
+        env["ME_TOOLS_URL"] = ini.as_uri()
+        env["ME_DOWNLOAD_DIR"] = str(tmp / "cache2")
+        env["LOCALAPPDATA"] = str(tmp / "localappdata")
+        env["ME_NO_NET"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "main.py"), "--tools-dir", str(cli_tools),
+             "--tools-get", "--json"],
+            cwd=str(ROOT), env=env, capture_output=True)
+        out = proc.stdout.decode("utf-8", "replace")
+        events = []
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    pass
+        kinds = [e.get("t") for e in events]
+        check(proc.returncode == 0, f"退出码 0（实际 {proc.returncode}）",
+              (proc.stderr or b"")[-300:].decode("utf-8", "replace"))
+        check("progress" in kinds, "发了 progress 事件（GUI 进度条能动）",
+              str(kinds[:12]))
+        check("tool_get" in kinds, "发了 tool_get 事件", str(kinds[:12]))
+        got = [e for e in events if e.get("t") == "tool_get"]
+        check(got and got[0].get("ok") is True, f"tool_get ok（{got[:1]}）")
+        check((cli_tools / "utmt" / "UndertaleModCli.exe").is_file(),
+              "工具真的落到 --tools-dir 指的地方",
+              str(list(cli_tools.rglob('*'))[:5]))
 
         print("\n" + "=" * 74)
         if FAIL:

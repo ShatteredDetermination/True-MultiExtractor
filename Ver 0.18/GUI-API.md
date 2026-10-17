@@ -174,6 +174,15 @@ Slim 包（V0.18E 起）不带 `tools/`，所以 `ok` 全是 `false`、退出码
 全下成功 → 进程退出码 `0`；仍有缺的 → `4`（与 `--tools` 一致）。
 壳可以据此显示「自动补工具」进度：`progress` 事件同样是 `phase=extract`。
 
+**下载期间也会发 `progress`**：每次尝试一开始先发一条 `done=0`（还没收到
+字节），之后每 64 KB 一条，`total` 取自 `Content-Length`。壳拿到
+`total<=1 且 done=0` 时按「连接中」处理，把进度条切成滚动条 —— 连
+GitHub 可能十几秒一个字节都到不了，停在 0 会被当成卡死。
+
+镜像顺序：上次成功的镜像排第一（记在
+`%LOCALAPPDATA%\MultiExtractor\download\last_mirror.txt`），失败就换下一个；
+每次失败都发一条 `note`（形如 `直连 失败（8.0s）: …`），连接超时 8 秒。
+
 ### 壳的 5 颗软键（V0.18E，操作区下面那一行）
 
 壳不自己下载/解压，每颗键只拼一条 CLI 参数：

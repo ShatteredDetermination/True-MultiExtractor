@@ -46,8 +46,10 @@ MIRRORS = (
 )
 MIRROR_ENV = "ME_TOOLS_MIRROR"
 
-CONNECT_TIMEOUT = 60.0        # 秒。下载和「拉清单」不是一回事，这里可以宽松
-CHUNK = 1 << 18
+CONNECT_TIMEOUT = 8.0         # 秒。连接/读都按这个超时：GitHub 直连常被墙，
+                              # 卡 60 秒用户只会以为程序死了，要尽快换镜像
+CHUNK = 1 << 16               # 64 KB：块太大时慢镜像要好几秒才读完一块，
+                              # 期间一条进度都发不出来，GUI 会显示「未回报进度」
 MIN_FILE = 1024               # 小于这个字节的单文件一律当成下坏了
 
 _LOG = Callable[[str], None]
@@ -118,6 +120,30 @@ def download_dir() -> Path:
 
 def _cached_path(url: str) -> Path:
     return download_dir() / Path(url.split("?")[0]).name
+
+
+LAST_MIRROR_FILE = "last_mirror.txt"
+
+
+def last_mirror() -> str:
+    """上次下载成功的镜像前缀（空串=直连）。下次先试它。"""
+    try:
+        p = download_dir() / LAST_MIRROR_FILE
+        if p.is_file():
+            return p.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    return ""
+
+
+def remember_mirror(prefix: str) -> None:
+    """记下这次成功的镜像：GitHub 直连一卡十几秒，下次不该再从头试。"""
+    try:
+        d = download_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / LAST_MIRROR_FILE).write_text(prefix, encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _package_ok(pkg: Path, url: str) -> Tuple[bool, str]:
@@ -201,15 +227,26 @@ def _try_download(url: str, dest: Path, log: _LOG,
                   ) -> Tuple[bool, int, str]:
     """按镜像顺序下载一个 URL 到 dest。返回 (成功, 字节数, 错误)。"""
     # 镜像只对 http(s) 有意义：file:// 是自测用的本地地址，加了前缀就废了
-    order = mirrors() if url.lower().startswith(("http://", "https://")) else ("",)
+    order = list(mirrors()) if url.lower().startswith(("http://", "https://")) else [""]
+    # 上次成功的镜像先试：直连常被墙，每次都从直连开始纯属浪费十几秒
+    prev = last_mirror()
+    if prev in order:
+        order.remove(prev)
+        order.insert(0, prev)
     last = ""
     for prefix in order:
         full = (prefix + url) if prefix else url
-        tag = prefix or "直连"
+        tag = "直连" if prefix == "" else prefix
         log(f"  从 {tag} 取 {url.rsplit('/', 1)[-1]}")
+        t0 = time.time()
         ok, size, err = _download_once(full, dest, log, tick)
         if ok:
+            if url.lower().startswith(("http://", "https://")):
+                remember_mirror(prefix)
             return True, size, ""
+        # 失败也要说清是谁、花了多久 —— 否则用户只看到「卡住」，
+        # GUI 那边也只有一条「未回报进度」
+        log(f"  {tag} 失败（{time.time() - t0:.1f}s）: {err[:120]}")
         last = f"{tag}: {err}"
     return False, 0, last or "没有可用的下载地址"
 
@@ -222,6 +259,10 @@ def _download_once(url: str, dest: Path, log: _LOG,
     dest.parent.mkdir(parents=True, exist_ok=True)
     done = 0
     last = 0.0
+    # 先报一次「开始」：连接阶段可能十几个字节都还没到，GUI 至少知道
+    # 这一路已经在跑了（进度条切成滚动条，不会停在旧读数上）
+    if tick is not None:
+        tick(0, 0, dest.name)
     try:
         with urllib.request.urlopen(req, timeout=CONNECT_TIMEOUT) as resp:
             total = int(resp.headers.get("Content-Length") or 0)

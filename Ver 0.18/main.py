@@ -622,6 +622,11 @@ def cmd_tools_get(keys, allow_full: bool = False, only_cache: bool = False) -> i
     from me.tools import fetch
 
     man = tool_manifest.snapshot()
+    if man.source == "builtin" and os.environ.get("ME_NO_NET") != "1":
+        # 要下载就别拿内置清单凑合：等一次远端（3 秒封顶），
+        # 否则上游新加的工具永远看不到，用户下的永远是老四样
+        tool_manifest.warmup_done(tool_manifest.timeout_s())
+        man = tool_manifest.snapshot()
     ui.step("自动下载外部工具")
     ui.info(tool_manifest.status_line(man))
     events.emit("tools_manifest", source=man.source, version=man.version,
