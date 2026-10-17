@@ -180,6 +180,7 @@ def render(ui) -> str:
     ui.info("软键（直接按数字）：")
     for key, label in KEYS:
         ui.detail(f"[{key}] {label}")
+    ui.detail("（也可以直接输指令，如 /settings 进设置、/help 看全部）")
     return "ask"
 
 

@@ -382,7 +382,7 @@ def test_live():
         game.mkdir(parents=True)
         (tmp / "game" / "resources" / "app.asar").write_bytes(b"x" * 64)
 
-        feed = "\n".join(["/settings", "3", "4", "0", str(tmp / "game"), "0", ""])
+        feed = "\n".join(["/settings", "4", "5", "0", str(tmp / "game"), "0", ""])
         code, out = run_interactive(feed)
 
         # 用户报的原话是「[err] 路径不存在: \settings」——这条必须彻底消失
@@ -391,6 +391,16 @@ def test_live():
         check("[设置]" in out, "进了设置面板")
         check("实验性功能" in out and "[开]" in out, "开关能改", out[-600:])
         check(code in (0, 1), f"退出码正常（{code}）")
+        # 提醒：一进来就该知道 /help，路径打错也不该被踢出去
+        check("输入 /help 看指令" in out, "启动就有 /help 提醒", out[:600])
+        check("请输入游戏路径" in out and "/help 看指令" in out,
+              "路径输入行带着提示", out[:600])
+
+        code_b, out_b = run_interactive("C:\\no\\such\\dir\n/quit\n")
+        check("路径不存在" in out_b, "打错路径会报出来", out_b[:400])
+        check("检查一下路径" in out_b, "并提醒可以 /help", out_b[:600])
+        check(out_b.count("请输入游戏路径") >= 2,
+              "打错之后会重问，而不是直接退出", str(out_b.count("请输入游戏路径")))
 
         section("5. 真跑：主菜单里敲 /help")
         feed2 = "\n".join([str(tmp / "game"), "/help", "/channels", "0", "0", ""])

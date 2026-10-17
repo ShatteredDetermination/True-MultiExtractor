@@ -96,6 +96,8 @@ def ask(prompt: str, default: Optional[str] = None) -> str:
     return clean_input(raw) or (default or "")
 
 
+HELP_HINT = "输入 /help 看指令（/settings 进设置）"
+
 # 斜杠指令的钩子：menu() 里遇到 `/xxx` 就交给它，不当作非法输入。
 # 由 main.interactive 装一次；没装时 `/xxx` 仍然按非法输入处理。
 _COMMAND_HOOK = None
@@ -134,6 +136,8 @@ def menu(title: str, options: list) -> int:
         if raw.isdigit() and 0 <= int(raw) < len(options):
             return int(raw)
         error("无效输入")
+        if _COMMAND_HOOK is not None:
+            detail(f"提示：{HELP_HINT}")
 
 
 # 输出被重定向（写日志、管道）时 \r 不生效，改成按百分比打行，避免刷屏

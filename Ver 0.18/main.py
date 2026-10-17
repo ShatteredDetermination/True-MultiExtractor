@@ -794,6 +794,8 @@ def cmd_extract(target: Path, args, categories) -> int:
 def interactive(args) -> int:
     ctx = commands.Context(args=args)
     ui.set_command_hook(lambda raw: commands.handle(raw, ctx))
+    # 第一次进菜单就把「怎么求助」说清楚：斜杠指令不好猜，得提醒。
+    ui.info(f"提示：{ui.HELP_HINT}")
     _warn_missing_tools()
 
     # 首次无网无缓存：先过一遍软键菜单，避免用户对着「第三方通道不可用」
@@ -994,7 +996,7 @@ def _ask_target():
     """
     while True:
         # ui.ask 已经去过引号/空白/BOM，这里再兜一次底（用户可能从别处粘进来）
-        raw = ui.clean_input(ui.ask("请输入游戏路径（文件或目录）"))
+        raw = ui.clean_input(ui.ask("请输入游戏路径（文件或目录，/help 看指令）"))
         if raw.startswith("/"):
             if ui.command(raw) == "quit":
                 raise SystemExit(config.EXIT_OK)
@@ -1005,8 +1007,10 @@ def _ask_target():
             return None
         target = Path(raw)
         if not target.exists():
+            # 打错了不该被一脚踢出去：说清楚 + 提醒能求助，然后重问
             ui.error(f"路径不存在: {target}")
-            return None
+            ui.detail(f"检查一下路径；{ui.HELP_HINT}")
+            continue
         return target
 
 

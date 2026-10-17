@@ -27,7 +27,8 @@ HELP_LINE = "指令（行首带斜杠）："
 # 指令表：名字 -> (一行说明, 处理函数的属性名)
 COMMANDS: Dict[str, Tuple[str, str]] = {
     "help": ("列出所有指令", "cmd_help"),
-    "settings": ("设置：保存位置 / 工具目录 / 会话开关", "cmd_settings"),
+    "settings": ("设置：保存位置 / 工具目录 / 检查与下载外部工具 / 会话开关",
+                 "cmd_settings"),
     "tools": ("看外部工具状态（缺了就提示怎么补）", "cmd_tools"),
     "channels": ("看每个引擎的拆包通道", "cmd_channels"),
     "setup": ("看 setup.ini 的位置与当前值", "cmd_setup"),
