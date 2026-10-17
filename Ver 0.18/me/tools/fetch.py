@@ -63,10 +63,11 @@ class Result:
 
     key: str
     ok: bool = False
-    how: str = ""             # skip / zip / file / package / manual / fail
+    how: str = ""             # skip / zip / file / package / cache / manual / fail
     path: Optional[Path] = None
     size: int = 0
     error: str = ""
+    cached: bool = False      # 用的是本地缓存安装包
 
     def line(self) -> str:
         name = f"{self.key:<12}"
@@ -75,9 +76,12 @@ class Result:
         if self.ok:
             mb = self.size / 1024 / 1024
             extra = f"（{mb:.1f} MB）" if mb >= 0.1 else ""
-            return f"{name} 下载完成 {extra}{self.path or ''}".rstrip()
+            how = "缓存安装完成" if self.cached else "下载完成"
+            return f"{name} {how} {extra}{self.path or ''}".rstrip()
         if self.how == "manual":
             return f"{name} 需要手工放置：{self.error}"
+        if self.how == "nocache":
+            return f"{name} 没有本地缓存安装包"
         return f"{name} 失败：{self.error}"
 
 
@@ -116,16 +120,39 @@ def _cached_path(url: str) -> Path:
     return download_dir() / Path(url.split("?")[0]).name
 
 
+def _package_ok(pkg: Path, url: str) -> Tuple[bool, str]:
+    """缓存里的安装包能不能直接用。"""
+    if not pkg.is_file():
+        return False, f"没有本地缓存安装包 {pkg.name}"
+    if url.lower().endswith(".zip"):
+        good, why = _zip_ok(pkg)
+        return (good, why)
+    if pkg.stat().st_size < MIN_FILE:
+        return False, f"缓存的 {pkg.name} 只有 {pkg.stat().st_size} 字节"
+    return True, ""
+
+
 def _fetch_package(url: str, log: _LOG,
                    tick: Optional[Callable[[int, int, str], None]] = None,
-                   force: bool = False) -> Tuple[Optional[Path], int, str]:
-    """取一个安装包：缓存能用就直接用，否则下载。返回 (路径, 字节数, 错误)。"""
+                   force: bool = False, use_cache: bool = True,
+                   only_cache: bool = False
+                   ) -> Tuple[Optional[Path], int, str]:
+    """取一个安装包。返回 (路径, 字节数, 错误)。
+
+    缓存策略（用户要求）：
+      * 默认**不用**缓存 —— 一律重新下载，避免装上旧包/坏包；
+      * ``only_cache=True`` 时只用缓存，一个字节都不下（软键 / `[10]` 用）；
+      * ``use_cache=True`` 才允许「缓存能用就直接用」。
+    """
     pkg = _cached_path(url)
-    if not force and pkg.is_file():
-        if url.lower().endswith(".zip"):
-            good, _why = _zip_ok(pkg)
-        else:
-            good = pkg.stat().st_size >= MIN_FILE
+    if only_cache:
+        good, why = _package_ok(pkg, url)
+        if not good:
+            return None, 0, why
+        log(f"  用本地缓存安装包 {pkg.name}")
+        return pkg, pkg.stat().st_size, ""
+    if not force and use_cache and pkg.is_file():
+        good, _why = _package_ok(pkg, url)
         if good:
             log(f"  用缓存的安装包 {pkg.name}")
             return pkg, pkg.stat().st_size, ""
@@ -314,9 +341,13 @@ def _common_prefix(names: List[str]) -> str:
 # ---------------------------------------------------------------- 装一个
 def install_one(key: str, root: Optional[Path] = None, force: bool = False,
                 log: _LOG = _noop,
-                tick: Optional[Callable[[int, int, str], None]] = None
+                tick: Optional[Callable[[int, int, str], None]] = None,
+                use_cache: bool = False, only_cache: bool = False
                 ) -> Result:
-    """下载并部署一个工具。已就位则跳过（force=True 重下）。"""
+    """下载并部署一个工具。已就位则跳过（force=True 重下）。
+
+    ``use_cache`` / ``only_cache`` 见 :func:`_fetch_package`：默认不碰缓存。
+    """
     spec = paths.specs().get(key)
     if spec is None:
         return Result(key, how="fail", error="清单里没有这个工具")
@@ -333,20 +364,24 @@ def install_one(key: str, root: Optional[Path] = None, force: bool = False,
 
     url = (spec.url or "").strip()
     if not url:
+        if only_cache:
+            return Result(key, how="nocache")
         return Result(key, how="manual",
                       error="tools.ini 没给下载地址（上游只发 .7z 之类），"
                             "用全量包或手工放置")
 
     log(f"{key}: {spec.name}")
     dest_dir.mkdir(parents=True, exist_ok=True)
-    pkg, size, err = _fetch_package(url, log, tick, force)
+    pkg, size, err = _fetch_package(url, log, tick, force,
+                                    use_cache=use_cache, only_cache=only_cache)
     if pkg is None:
-        return Result(key, how="fail", error=err)
+        return Result(key, how="nocache" if only_cache else "fail", error=err)
 
     if url.lower().endswith(".zip"):
         good, why = _zip_ok(pkg)
         if not good:
-            _unlink(pkg)
+            if not only_cache:
+                _unlink(pkg)
             return Result(key, how="fail", error=why)
         n, err2 = extract_zip(pkg, dest_dir)
         if err2:
@@ -355,7 +390,8 @@ def install_one(key: str, root: Optional[Path] = None, force: bool = False,
         log(f"  解压 {n} 个文件 -> {dest_dir}")
     else:
         if pkg.stat().st_size < MIN_FILE:
-            _unlink(pkg)
+            if not only_cache:
+                _unlink(pkg)
             return Result(key, how="fail",
                           error=f"下载的文件只有 {pkg.stat().st_size} 字节，太小")
         target = dest_dir / (exe or Path(url).name)
@@ -372,7 +408,8 @@ def install_one(key: str, root: Optional[Path] = None, force: bool = False,
     if hit is None:
         return Result(key, how="fail", size=size,
                       error="下完了解压出来却没有 " + (exe or spec.primary))
-    return Result(key, ok=True, how=how, path=hit, size=size)
+    return Result(key, ok=True, how=how, path=hit, size=size,
+                  cached=only_cache)
 
 
 # ---------------------------------------------------------------- 全量包
@@ -384,9 +421,13 @@ def package_url() -> str:
 
 def install_from_package(keys: List[str], root: Optional[Path] = None,
                          log: _LOG = _noop,
-                         tick: Optional[Callable[[int, int, str], None]] = None
+                         tick: Optional[Callable[[int, int, str], None]] = None,
+                         only_cache: bool = False
                          ) -> List[Result]:
-    """下载一次全量包，只从里面挑出这些工具的目录。"""
+    """下载一次全量包，只从里面挑出这些工具的目录。
+
+    ``only_cache=True`` 时只用缓存里的全量包，不联网。
+    """
     base = Path(root) if root else tools_root()
     url = package_url()
     if not url.lower().endswith(".zip"):
@@ -395,14 +436,17 @@ def install_from_package(keys: List[str], root: Optional[Path] = None,
                 for k in keys]
 
     log(f"全量包：{url.rsplit('/', 1)[-1]}")
-    pkg, size, err = _fetch_package(url, log, tick)
+    pkg, size, err = _fetch_package(url, log, tick, use_cache=False,
+                                    only_cache=only_cache)
     if pkg is None:
-        return [Result(k, how="fail", error=err) for k in keys]
+        how = "nocache" if only_cache else "fail"
+        return [Result(k, how=how, error=err) for k in keys]
 
     out: List[Result] = []
     good, why = _zip_ok(pkg)
     if not good:
-        _unlink(pkg)
+        if not only_cache:
+            _unlink(pkg)
         return [Result(k, how="fail", error=why) for k in keys]
 
     if True:
@@ -433,7 +477,7 @@ def install_from_package(keys: List[str], root: Optional[Path] = None,
             else:
                 log(f"  {key}: 从全量包取出 {n} 个文件")
                 out.append(Result(key, ok=True, how="package", path=hit,
-                                  size=size))
+                                  size=size, cached=only_cache))
     return out
 
 
@@ -441,13 +485,15 @@ def install_from_package(keys: List[str], root: Optional[Path] = None,
 def install(keys: Optional[List[str]] = None, root: Optional[Path] = None,
             force: bool = False, log: _LOG = _noop,
             tick: Optional[Callable[[int, int, str], None]] = None,
-            allow_package: bool = True):
+            allow_package: bool = True, use_cache: bool = False,
+            only_cache: bool = False):
     """下载所有缺的工具。返回 (results, used_package)。
 
     先走各自的直链；没有直链的（AssetStudio 只发 .7z）再用一次全量包兜底 ——
-    全量包只下**一次**，而且会留在缓存里，重装不再重下。
+    全量包只下**一次**。
 
     ``allow_package=False`` 时绝不下全量包（一百多 MB，必须由调用方明确同意）。
+    缓存默认**不用**：``only_cache=True``（/settings 的 [10]）才读本地缓存包。
     """
     if keys is None:
         keys = missing_keys(root)
@@ -455,18 +501,32 @@ def install(keys: Optional[List[str]] = None, root: Optional[Path] = None,
     need_pkg: List[str] = []
 
     for key in keys:
-        res = install_one(key, root, force, log, tick)
+        res = install_one(key, root, force, log, tick,
+                          use_cache=use_cache, only_cache=only_cache)
+        spec = paths.specs().get(key)
         results.append(res)
         if not res.ok and allow_package:
-            spec = paths.specs().get(key)
-            if spec is not None and not spec.url:
+            if only_cache or (spec is not None and not spec.url):
                 need_pkg.append(key)
 
     used_package = False
     if need_pkg:
-        log(f"以下工具没有直链，改用全量包：{', '.join(need_pkg)}")
-        pkg_results = install_from_package(need_pkg, root, log, tick)
+        log(f"以下工具从全量包取：{', '.join(need_pkg)}")
+        pkg_results = install_from_package(need_pkg, root, log, tick,
+                                           only_cache=only_cache)
         used_package = True
         by_key: Dict[str, Result] = {r.key: r for r in pkg_results}
         results = [by_key.get(r.key, r) for r in results]
     return results, used_package
+
+
+def cached_packages() -> List[str]:
+    """本地缓存目录里有哪些安装包（给 `[10]` 先报个清单）。"""
+    d = download_dir()
+    if not d.is_dir():
+        return []
+    try:
+        return sorted(p.name for p in d.iterdir()
+                      if p.is_file() and not p.name.endswith(".part"))
+    except OSError:
+        return []

@@ -110,31 +110,42 @@ def scan(found_cb=None) -> Optional[Path]:
     return None
 
 
-def download(ui, allow_package: Optional[bool] = None):
+def download(ui, allow_package: Optional[bool] = None, only_cache: bool = False):
     """真的把缺的工具下下来。返回 (结果列表, 是否用了全量包)。
 
     有直链的走直链；只有 .7z 的（AssetStudio）走全量包 —— 全量包一百多 MB，
     所以交互式里会先问一句，非交互（allow_package=True）则直接下。
+
+    ``only_cache=True``（设置面板 [10]）只用本地缓存安装包：
+    一个字节都不下，缓存里没有就直说没有。
     """
     missing = fetch.missing_keys()
     if not missing:
         ui.ok("外部工具齐全，无需下载")
         return [], False
 
-    ui.step("下载: " + ", ".join(missing))
+    if only_cache:
+        cached = fetch.cached_packages()
+        if not cached:
+            ui.warn("没有本地缓存安装包: " + str(fetch.download_dir()))
+            return [], False
+        ui.step("本地缓存安装包: " + ", ".join(cached))
+    else:
+        ui.step("下载: " + ", ".join(missing))
 
     def tick(done, total, name):
         # 有总长才画百分比；没有就按已下字节数报（Content-Length 缺失很常见）
         ui.progress(done, total, f"下载 {name}")
 
     results, used_pkg = fetch.install(
-        missing, log=lambda m: ui.detail(m), tick=tick, allow_package=False)
+        missing, log=lambda m: ui.detail(m), tick=tick,
+        allow_package=(True if only_cache else False), only_cache=only_cache)
 
     for res in results:
         (ui.ok if res.ok else ui.warn)(res.line())
 
     still = [r.key for r in results if not r.ok]
-    if still and allow_package is not False:
+    if still and not only_cache and allow_package is not False:
         url = fetch.package_url()
         if url.lower().endswith(".zip"):
             if allow_package is None:

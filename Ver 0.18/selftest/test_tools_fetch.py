@@ -204,7 +204,34 @@ def main() -> int:
             forced = fetch.install_one("utmt", force=True)
             check(forced.ok and forced.how == "zip",
                   f"force 重装（{forced.how}）", forced.error)
-            check(len(calls) == 1, "force 时用的是缓存安装包（仍算 1 次取用）")
+            check(len(calls) == 1, "force 时重新下载一次")
+
+            # 缓存策略（用户要求：默认不用缓存，除非选 [10] 加载本地缓存安装包）
+            shutil.rmtree(tools_root / "utmt", ignore_errors=True)
+            check(any(fetch.download_dir().glob("*.zip")), "缓存里已经有安装包")
+            calls.clear()
+            fresh = fetch.install_one("utmt")
+            check(fresh.ok and len(calls) == 1,
+                  f"缓存里有包也重新下载（{len(calls)} 次）", fresh.error)
+            check(fresh.cached is False, "结果标着不是缓存")
+            check("下载完成" in fresh.line(), fresh.line())
+
+            shutil.rmtree(tools_root / "utmt", ignore_errors=True)
+            calls.clear()
+            from_cache = fetch.install_one("utmt", only_cache=True)
+            check(from_cache.ok and from_cache.cached is True,
+                  f"only_cache 用缓存装成功（{from_cache.how}）",
+                  from_cache.error)
+            check(not calls, "only_cache 一个字节都没下")
+            check("缓存安装完成" in from_cache.line(), from_cache.line())
+
+            shutil.rmtree(tools_root / "utmt", ignore_errors=True)
+            for p in fetch.download_dir().glob("*.zip"):
+                p.unlink()
+            nc = fetch.install_one("utmt", only_cache=True)
+            check(not nc.ok and nc.how == "nocache",
+                  f"缓存空了 -> nocache（{nc.how}）")
+            check("没有本地缓存安装包" in nc.line(), nc.line())
         finally:
             fetch._download_once = real_dl_once
 
@@ -243,7 +270,7 @@ def main() -> int:
         check(not (tools_root / "resources").exists(),
               "没有把 resources/ 倒进工具根")
 
-        # 缓存：再装一次不该重新下载
+        # 缓存策略：默认重新下载；only_cache 才读缓存
         shutil.rmtree(tools_root / "assetstudio", ignore_errors=True)
         calls2 = []
 
@@ -254,8 +281,18 @@ def main() -> int:
         fetch._download_once = counting2
         try:
             again2 = fetch.install_from_package(["assetstudio"])
-            check(again2[0].ok and not calls2,
-                  f"第二次用缓存不再下载（{len(calls2)} 次）")
+            check(again2[0].ok and len(calls2) == 1,
+                  f"默认不用缓存：第二次仍然重新下（{len(calls2)} 次）")
+            check(again2[0].cached is False, "结果标着不是缓存")
+
+            shutil.rmtree(tools_root / "assetstudio", ignore_errors=True)
+            calls2.clear()
+            from_cache = fetch.install_from_package(["assetstudio"],
+                                                    only_cache=True)
+            check(from_cache[0].ok and not calls2,
+                  f"only_cache 用缓存里的全量包（下载 {len(calls2)} 次）")
+            check(from_cache[0].cached is True, "结果标着来自本地缓存")
+            check("缓存安装完成" in from_cache[0].line(), from_cache[0].line())
         finally:
             fetch._download_once = real_dl_once
 

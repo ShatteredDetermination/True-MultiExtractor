@@ -218,7 +218,8 @@ def render_settings(ctx: Context) -> None:
         ui.detail(f"  [{i}] {row}")
     ui.detail("  [8] 检查外部工具")
     ui.detail("  [9] 下载缺失工具")
-    ui.detail("  [10] 重置工具根目录")
+    ui.detail("  [10] 加载本地缓存安装包")
+    ui.detail("  [11] 重置工具根目录")
     ui.detail("  [0] 返回")
 
 
@@ -248,10 +249,12 @@ def cmd_settings(ctx: Context, _argv: List[str]) -> None:
         elif raw == "9":
             _download_tools(ctx)
         elif raw == "10":
+            _install_cached(ctx)
+        elif raw == "11":
             tool_paths.clear_override_dir()
             ui.ok("工具根目录已重置")
         else:
-            ui.warn("范围 0-10")
+            ui.warn("范围 0-11")
 
 
 def _toggle(ctx: Context, name: str, label: str) -> None:
@@ -271,14 +274,29 @@ def _show_tool_report() -> None:
 
 
 def _download_tools(_ctx: Context) -> None:
-    """自动下载缺失的工具。走软键 1 同一条路（含全量包询问）。
+    """下载缺失的工具。走软键 1 同一条路（含全量包询问）。
 
-    下完把结果落回面板摘要 —— 用户不用再按一次 3/8 才知道成没成。
+    默认**不用**本地缓存安装包 —— 一律重新下，避免装上旧包/坏包；
+    要用缓存请按 [10]。
     """
     from me.tools import softkey
 
     before = tools_summary()
     softkey.download(ui)
+    after = tools_summary()
+    if after != before:
+        ui.info(f"外部工具: {before} -> {after}")
+
+
+def _install_cached(_ctx: Context) -> None:
+    """用本地缓存安装包补齐缺失工具（不联网）。
+
+    这条是缓存唯一的入口：用户明确按 [10] 才会读缓存目录里的安装包。
+    """
+    from me.tools import softkey
+
+    before = tools_summary()
+    softkey.download(ui, allow_package=False, only_cache=True)
     after = tools_summary()
     if after != before:
         ui.info(f"外部工具: {before} -> {after}")

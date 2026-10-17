@@ -82,6 +82,9 @@ def _build_parser() -> "_Parser":
     ap.add_argument("--tools-get-full", action="store_true",
                     help="允许为了补工具下载全量包（约 140 MB）；"
                          "--tools-get 默认不下")
+    ap.add_argument("--tools-get-cache", action="store_true",
+                    help="只用本地缓存安装包补齐缺失工具（不联网）；"
+                         "默认一律重新下载")
     ap.add_argument("--update", nargs="?", const="", default=None,
                     metavar="VERID",
                     help="在线更新：拉远端 version.json 比版本、下更新包、"
@@ -118,8 +121,9 @@ def _dispatch(args) -> int:
         return cmd_version()
     if args.categories:
         return cmd_categories()
-    if args.tools_get is not None:
-        return cmd_tools_get(args.tools_get, args.tools_get_full)
+    if args.tools_get is not None or args.tools_get_cache:
+        return cmd_tools_get(args.tools_get or [], args.tools_get_full,
+                             args.tools_get_cache)
     if args.tools:
         return cmd_tools()
     if args.engines:
@@ -605,12 +609,15 @@ def _self_invocation() -> str:
         return "MultiExtractorCLI.exe"
 
 
-def cmd_tools_get(keys, allow_full: bool = False) -> int:
+def cmd_tools_get(keys, allow_full: bool = False, only_cache: bool = False) -> int:
     """自动下载缺失的外部工具（--tools-get）。
 
     这是「程序自己下」的入口：有直链走直链（按镜像顺序重试），
     只有 .7z 的（AssetStudio）需要全量包 —— 一百多 MB，所以默认**不下**，
     要显式 --tools-get-full 或在交互式软键里按 y。
+
+    缓存策略：默认**不用**本地缓存安装包，一律重新下载；
+    ``only_cache=True``（--tools-get-cache / 设置面板 [10]）只读缓存、不联网。
     """
     from me.tools import fetch
 
@@ -637,6 +644,8 @@ def cmd_tools_get(keys, allow_full: bool = False) -> int:
         events.emit("end", exit=config.EXIT_ARGS)
         return config.EXIT_ARGS
 
+    if only_cache:
+        ui.step("本地缓存安装包: " + (", ".join(fetch.cached_packages()) or "无"))
     ui.info(f"待下载: {', '.join(wanted)}")
 
     def tick(done, total, name):
@@ -644,7 +653,7 @@ def cmd_tools_get(keys, allow_full: bool = False) -> int:
 
     results, used_pkg = fetch.install(
         wanted, log=lambda m: ui.detail(m), tick=tick,
-        allow_package=allow_full)
+        allow_package=allow_full or only_cache, only_cache=only_cache)
     if used_pkg:
         ui.info("来源: 全量包")
 
@@ -653,14 +662,17 @@ def cmd_tools_get(keys, allow_full: bool = False) -> int:
         (ui.ok if res.ok else ui.warn)(res.line())
         events.emit("tool_get", key=res.key, ok=res.ok, how=res.how,
                     path=str(res.path) if res.path else None,
-                    size=res.size, error=res.error or None)
+                    size=res.size, error=res.error or None,
+                    cached=res.cached)
 
     left = [r.key for r in results if not r.ok]
     if left:
         ui.sep()
         ui.warn(f"仍缺 {len(left)} 个: {', '.join(left)}")
-        if not allow_full:
-            ui.info("加 --tools-get-full 可用全量包（约 140 MB，下过一次会缓存）")
+        if only_cache:
+            ui.info("缓存里没有: 去掉 --tools-get-cache 走网络下载")
+        elif not allow_full:
+            ui.info("加 --tools-get-full 可用全量包（约 140 MB）")
         ui.info(f"或 --tools-dir <目录>（{_self_invocation()}）")
         events.emit("end", exit=config.EXIT_TOOL)
         return config.EXIT_TOOL

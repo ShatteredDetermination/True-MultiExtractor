@@ -177,9 +177,11 @@ def main() -> int:
         real_install = fetch.install
 
         def fake_install(keys=None, root=None, force=False, log=None,
-                         tick=None, allow_package=True):
+                         tick=None, allow_package=True, use_cache=False,
+                         only_cache=False):
             calls.append({"keys": list(keys or []),
-                          "allow_package": allow_package})
+                          "allow_package": allow_package,
+                          "only_cache": only_cache})
             if log:
                 log("  （假装从网上下载）")
             if tick:
@@ -205,7 +207,30 @@ def main() -> int:
                   f"把缺的都交给下载器（{calls[0]['keys'] if calls else None}）")
             check(calls and calls[0]["allow_package"] is False,
                   "按键 1 不会偷偷下 140 MB 全量包")
+            check(calls and calls[0]["only_cache"] is False,
+                  "按键 1 默认不用本地缓存安装包")
             check(paths.any_installed() is True, "下完工具根里真的有 exe")
+
+            # only_cache（设置面板 [10]）：缓存里得先有包
+            cache_dir = fetch.download_dir()
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            fake_pkg = cache_dir / "fake_pkg.zip"
+            fake_pkg.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+            calls.clear()
+            ui_c = FakeUi()
+            softkey.download(ui_c, allow_package=False, only_cache=True)
+            check(calls and calls[0]["only_cache"] is True,
+                  "only_cache 原样交给下载器", str(calls))
+            check("本地缓存安装包" in ui_c.text(), "先说清楚要用缓存",
+                  ui_c.text()[:300])
+
+            # 缓存空着就直说，不偷偷联网
+            fake_pkg.unlink()
+            calls.clear()
+            ui_e = FakeUi()
+            softkey.download(ui_e, allow_package=False, only_cache=True)
+            check(not calls and "没有本地缓存安装包" in ui_e.text(),
+                  "缓存空 -> 不联网、如实说", ui_e.text()[:300])
         finally:
             fetch.install = real_install
 

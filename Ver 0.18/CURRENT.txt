@@ -934,3 +934,32 @@ test_softkey.py 补 3 项：软键菜单里 /settings 之后还能按 4、/quit 
 自测：test_commands 59 项、test_softkey 76 项按新文案改断言；
 全量 ME_NO_NET=1 python selftest/run_all.py -> 35/35 通过（含打包版实测）。
 版本号未动：0.18E Beta 00096。
+
+------------------------------------------------------------------------------
+缓存安装包不再自动使用：[10] 加载本地缓存安装包，原 10 改为 11（用户要求）
+------------------------------------------------------------------------------
+原来 install() 的默认行为是「缓存里有包就直接用」—— 用户实测发现这会悄悄
+装上旧包/坏包。现在：
+
+  * 默认一律重新下载（fetch._fetch_package 的 use_cache=False）；
+  * 缓存只剩一个入口：设置面板 [10] 加载本地缓存安装包（= --tools-get-cache），
+    只读 %LOCALAPPDATA%\MultiExtractor\download，一个字节都不下；
+  * 缓存空着就直说「没有本地缓存安装包」，绝不偷偷联网；
+  * [10] 原来是「重置工具根目录」，现在顺延为 [11]，范围提示改成 0-11。
+
+面板：
+        [9] 下载缺失工具          ← 走网络，不使用缓存
+        [10] 加载本地缓存安装包    ← 新，只读缓存
+        [11] 重置工具根目录        ← 原 [10]
+
+结果对象与输出：
+  * Result 加 cached 字段；line() 打印「缓存安装完成」而不是「下载完成」；
+  * 新增 how="nocache"（缓存里没有），line() 打印「没有本地缓存安装包」；
+  * tool_get 事件多一个 cached 字段；--tools-get 失败时提示「去掉
+    --tools-get-cache 走网络下载」；
+  * 全量包同样遵守这条规则：默认重新下，only_cache 时才用缓存里的那份 zip。
+
+自测：test_tools_fetch 59 项（新增：缓存里有包也重新下、only_cache 不联网、
+缓存空了报 nocache、全量包 only_cache）；test_softkey 80 项（only_cache 透传、
+缓存空不联网）；test_commands 61 项（按 10 只读缓存、按 11 重置）。
+全量 ME_NO_NET=1 python selftest/run_all.py -> 35/35 通过。

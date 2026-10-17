@@ -292,8 +292,8 @@ def test_settings():
         real_dl = _softkey.download
         dl_calls = []
 
-        def fake_download(ui_obj, allow_package=None):
-            dl_calls.append(allow_package)
+        def fake_download(ui_obj, allow_package=None, only_cache=False):
+            dl_calls.append((allow_package, only_cache))
             ui_obj.ok("（假装下载完成）")
             tree2 = tmp / "mytools"
             (tree2 / "repak").mkdir(parents=True, exist_ok=True)
@@ -308,29 +308,43 @@ def test_settings():
                 commands.handle("/settings", ctx)
             finally:
                 restore()
-            check(dl_calls == [None], "按 9 调下载器（并允许它问全量包）",
+            check(dl_calls == [(None, False)],
+                  "按 9 走网络下载（不给 allow_package，也不用缓存）",
                   str(dl_calls))
             check("假装下载完成" in fake.text(), "把下载器的输出透出来了")
+
+            # ---- 5) 加载本地缓存安装包（新 [10]）----
+            dl_calls.clear()
+            fake = FakeUi(["10", "0"])
+            restore = patch_ui(fake)
+            try:
+                commands.handle("/settings", ctx)
+            finally:
+                restore()
+            check(dl_calls == [(False, True)],
+                  "按 10 只读本地缓存（only_cache=True）", str(dl_calls))
+            check("加载本地缓存安装包" in fake.text(), "面板上有这一项",
+                  fake.text()[:800])
         finally:
             _softkey.download = real_dl
 
-        # ---- 5) 重置工具根目录 ----
-        fake = FakeUi(["10", "0"])
+        # ---- 6) 重置工具根目录（原 [10]，现 [11]）----
+        fake = FakeUi(["11", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
         finally:
             restore()
-        check(tool_paths.override_dir() is None, "10 把工具根目录清回默认")
+        check(tool_paths.override_dir() is None, "11 把工具根目录清回默认")
 
-        # ---- 6) 非法选项 ----
+        # ---- 7) 非法选项 ----
         fake = FakeUi(["99", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
         finally:
             restore()
-        check("范围 0-10" in fake.text(), "乱按有提示", fake.text()[-120:])
+        check("范围 0-11" in fake.text(), "乱按有提示", fake.text()[-120:])
 
         # ---- 6) 会话与会话标志同步 ----
         class Sess:

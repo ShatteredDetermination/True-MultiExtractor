@@ -45,6 +45,7 @@
 | `--tools-refresh` | 强制重新拉远端 `tools.ini` |
 | `--tools-get [KEY...]` | 自动下载缺失的外部工具；事件流里发 `tool_get` + `end` |
 | `--tools-get-full` | 允许为补工具下载全量包（约 140 MB） |
+| `--tools-get-cache` | 只用本地缓存安装包补齐（不联网）；默认一律重新下载 |
 | `--update [VERID]` | 在线更新（查清单 → 下载 → 校验 → 交接守护进程），见第 10 节 |
 | `--engines` | 列出引擎模块 |
 | `--categories` | 列出分类 |
@@ -158,14 +159,16 @@ Slim 包（V0.18E 起）不带 `tools/`，所以 `ok` 全是 `false`、退出码
 
 ```json
 {"t":"tool_get","seq":9,"ms":4200,"key":"repak","ok":true,"how":"zip",
- "path":"C:\\...\\tools\\repak\\repak.exe","size":2022374,"error":null}
+ "path":"C:\\...\\tools\\repak\\repak.exe","size":2022374,"error":null,
+ "cached":false}
 ```
 
 | 字段 | 说明 |
 |---|---|
 | `ok` | 是否装好（按清单 `paths` 第一条验证） |
-| `how` | `skip` 已就位 / `zip` 解压安装 / `file` 单文件 / `package` 来自全量包 / `manual` 需手工 / `fail` 失败 |
-| `size` | 取回的字节数（用缓存时是缓存大小） |
+| `how` | `skip` 已就位 / `zip` 解压安装 / `file` 单文件 / `package` 来自全量包 / `manual` 需手工 / `nocache` 缓存里没有 / `fail` 失败 |
+| `size` | 取回的字节数（来自缓存时是缓存大小） |
+| `cached` | 是否用的是本地缓存安装包（只有 `--tools-get-cache` / 设置 `[10]` 才会为 `true`） |
 | `error` | 失败原因；`manual` 时说明为什么不能自动下 |
 
 全下成功 → 进程退出码 `0`；仍有缺的 → `4`（与 `--tools` 一致）。
