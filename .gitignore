@@ -1,0 +1,33 @@
+# 构建产物 / 测试临时文件
+dist/
+build_exe/
+work/
+Extract Resources/
+_out/
+selftest/_out/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 第三方 CLI 二进制（用 tools/setup_tools.py 下载，不进仓库）
+tools/utmt/
+tools/assetstudio/
+tools/evbunpack/
+tools/repak/
+tools/_download/
+*.7z
+*.rar
+
+# 压缩包 / 可执行文件
+*.zip
+*.exe
+*.dll
+*.pdb
+
+# 编辑器
+.vs/
+.vscode/
+*.user
