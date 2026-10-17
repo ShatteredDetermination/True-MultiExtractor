@@ -174,6 +174,22 @@ Slim 包（V0.18E 起）不带 `tools/`，所以 `ok` 全是 `false`、退出码
 全下成功 → 进程退出码 `0`；仍有缺的 → `4`（与 `--tools` 一致）。
 壳可以据此显示「自动补工具」进度：`progress` 事件同样是 `phase=extract`。
 
+### 壳的 5 颗软键（V0.18E，操作区下面那一行）
+
+壳不自己下载/解压，每颗键只拼一条 CLI 参数：
+
+| 键 | 文本 | 调用的 CLI | 结果落点 |
+|---|---|---|---|
+| 1 | 下载工具 | `--tools-get --json`；退出码 4 时问一次再用 `--tools-get --tools-get-full --json` | `<CLI 目录>/tools/` |
+| 2 | 扫描本机 | 壳自己扫桌面 / 下载 / 文档 / `C:\Tools` 等（找 `UndertaleModCli.exe` / `AssetStudio.CLI.exe` / `evbunpack.exe` / `repak.exe`），命中后 `--tools --json --tools-dir <根>` | `toolsdir.ini` |
+| 3 | 指定目录 | `--tools --json --tools-dir <选的目录>` | `toolsdir.ini` |
+| 4 | 仅自研 | 不调 CLI：勾「实验性功能」+「自研核心」，之后提取带 `--experimental --self` | 本次会话 |
+| 5 | 缓存安装 | `--tools-get-cache --json`（只读 `%LOCALAPPDATA%\MultiExtractor\download`，不联网） | `<CLI 目录>/tools/` |
+
+1 / 2 / 3 / 5 跑完，壳会再跑一次 `--tools --json` 汇总，末尾给一句
+`[ok] 外部工具齐全` 或 `[!] 仍有工具缺失`。整行在「分析中 / 提取中 / 下载中」
+锁死，CLI 未就位时也锁死。
+
 ### `channel`
 走哪条拆包通道（V0.17）。在 `detect` 之后、`stage` 之前发，一次运行一条。
 

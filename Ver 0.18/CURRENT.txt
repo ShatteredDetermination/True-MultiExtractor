@@ -984,3 +984,32 @@ tools/，build_exe.py / make_dist.py 实测不删 —— 具体是谁删的还�
 
 自测：test_commands 62 项（多一项「工具数下降会明说」）。
 全量 ME_NO_NET=1 python selftest/run_all.py -> 35/35 通过。
+
+------------------------------------------------------------------------------
+GUI：操作区下面那一行五颗软键（V0.18E）
+------------------------------------------------------------------------------
+设计稿里 Button9–13 一直空着（原来被藏起来）。现在把它们做成「外部工具」
+软键行，与 CLI 的软键 1–4 + 设置面板 [10] 一一对应：
+
+  1 下载工具   --tools-get --json（退出码 4 时问一次，再 --tools-get --tools-get-full）
+  2 扫描本机   壳自己扫常见目录，命中后 --tools --json --tools-dir <根>
+  3 指定目录   FolderBrowserDialog → --tools --json --tools-dir <目录>
+  4 仅自研     不调 CLI：勾「实验性功能」+「自研核心」
+  5 缓存安装   --tools-get-cache --json（只读缓存，不联网）
+
+1/2/3/5 跑完再跑一次 --tools --json 汇总，末尾给 [ok] 外部工具齐全 /
+[!] 仍有工具缺失。分析中、提取中、下载中锁死整行；CLI 未就位时也锁死。
+
+位置：贴「操作区」底边排一行（左右留 9、间距 4、均分宽度）。
+不写死设计态坐标 —— 运行时操作区高度比设计值小（327x255 vs 384x334），
+写死 y=282 会掉到操作区外面看不见。改为 LayoutSoftKeys() 按
+GroupBox3.ClientSize 现算，Resize 时跟着重排；四字标签放不下时整行降 8pt。
+
+实测（打包版 816x527）：五颗键都可见、文案完整（下载工具/扫描本机/
+指定目录/仅自研/缓存安装），点「缓存安装」实际起了
+  MultiExtractorCLI.exe --tools-get-cache --json
+  MultiExtractorCLI.exe --tools --json
+点「下载工具」起了 --tools-get --json。
+
+构建：dotnet publish -c Release（单文件 49,354,577 B）→ make_dist.py 组装；
+CLI 侧未改代码。
