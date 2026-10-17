@@ -230,6 +230,35 @@ CTF 永远自研。壳可以用 `label` 直接显示「自研 / 第三方」，�
 0.14 起 `total` **永不回退**，`done` 只增不减，收工时一定有一条 `done == total`。
 所以可以直接显示百分比，进度条不会往回跳。
 
+### 壳怎么显示这个百分比
+
+参考壳 MultiExtractorGUI 的写法，可以直接照抄：
+
+```vb
+Dim pct As Integer = If(total <= 0, -1, CInt(done * 100L \ total))
+_barCap.Text = If(pct < 0, "操作进度: --", "操作进度: " & pct & "%")
+If pct >= 0 Then ProgressBar1.Value = Math.Min(100, pct)
+```
+
+* 标签与进度条用**同一个** `pct`，不要各算一遍；
+* `total <= 0` 或 `total <= 1 且 done = 0` 是「连接中」，标签写 `操作进度: --`，
+  进度条切滚动条；
+* 收工写 `操作进度: 100%`，清空写 `操作进度: --`；
+* 事件里 `pct` 单调，不用自己再钳制。
+
+### 日志行的时间戳
+
+参考壳在每条日志前加本地时间，格式 `[YYYY-MM-DD HH:MM:SS]`：
+
+```
+[2026-10-17 23:23:00] True MultiExtractor GUI
+[2026-10-17 23:23:00] [i] CLI C:\Users\Administrator\Desktop\...\MultiExtractorCLI.exe
+[2026-10-17 23:23:00] 下载中 3473408/62585935 下载 UTMT_CLI_v0.9.2.0-Windows.zip
+```
+
+空行不加时间戳。stdout 的 `progress`、`result` 等事件不必进日志，
+日志只放 stderr 的人读文本和壳自己的状态行。
+
 `total` 的单位是**工作单元**，不是文件数：解不开的纹理页、名字撞车的散落文件也
 照样记一个单位并推进，所以 `total` 是 `result.written` 的**上界**，可能略多几个。
 实测（0.14 Beta 00034）：
