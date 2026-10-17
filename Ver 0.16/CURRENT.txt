@@ -1,0 +1,53 @@
+True MultiExtractTool —— 0.16（全量重建，已发布）
+==========================================
+
+本目录 = 原 `Ver 0.15E` 的发布快照：内容一字未改，只把版本标签从
+`0.15E Beta 00068` 换成 `0.16 Beta 00068`。要改东西请去 `../Ver 0.17`
+（那边是开发线，验收通过前对外报 `0.16E`）。
+
+0.15 的「原位缝补」路线已经停用，改成「读成对象 → 重新算布局 → 整份写出」。
+
+版本关系：
+    Ver 0.10   最早的存档
+    Ver 0.11   重命名运行时目录、加 setup.ini
+    Ver 0.13   加 GUI 调用接口（NDJSON 事件流、固定退出码）
+    Ver 0.14   自研 data.win 解析器；去掉 UTMT 依赖
+    Ver 0.15   原位重建（填回原 span）—— 已证明不可行，保留作参照
+    Ver 0.15E  全量重建（开发线标签）
+    Ver 0.16   本目录 —— 0.15E 的发布版
+    Ver 0.17   当前开发线（对外报 0.16E）：自研 / 第三方两条拆包通道
+
+0.16 已落地的东西：
+    me/formats/gamemaker_ast.py          语义模型，不含任何偏移
+    me/formats/gamemaker_serializer.py   两遍布局 + 符号重定位 + 写后自检
+    me/formats/gamemaker_full.py         23 块全部建模；rebuild_file() 对外入口
+    selftest/test_strg_font_rebuild.py   49 项：合成样本、三个真实样本、幂等性
+    selftest/test_blob_chunks_rebuild.py 33 项：TXTR 128 对齐 / AUDO 4 对齐
+    selftest/test_chunk_matrix.py        38 项：16 种块 × 3 个样本
+    selftest/test_room_roundtrip.py      16 项：ROOM 逐字节比对 + 指针重定位
+    selftest/test_full_rebuild.py        14 项：整份重建 + UTMT 零告警
+    selftest/test_rebuild_cli.py         13 项：--rebuild 端到端（含 UTMT 零告警）
+
+命令行：
+    python main.py --rebuild <data.win>   全量重建（长度会变，指针全部重算）
+    python main.py --repair  <data.win>   先试全量重建，不行才退回等长原位补丁
+
+状态：
+    data.win   64,130,806 -> 63,042,302   UTMT 24/24 块，0 告警
+    data1.win  68,851,830 -> 58,477,298   UTMT 22/22 块，0 告警
+    data2.win  17,717,336 -> 17,459,404   UTMT 25/25 块，3 条告警（继承源文件）
+
+    GMS2 的房间（Layers）与特殊类型精灵都已建模，data2 也能整份重建。
+    剩下的 3 条告警来自源文件里几个块自带的补位（BGND +4、LANG/AGRP/GLOB +8、
+    TMLN +4），不是重建引入的：TMLN 在 GMS2 下 UTMT 一个字节都不读，
+    只有 0 长度的块才不告警，写 0 长度是否被 GM 接受还没验证。
+
+验收（不是「能跑」这种模糊标准）：
+    * 内容：STRG / TPAG / SPRT / TXTR / AUDO / FONT / OBJT / ROOM 逐条与源文件一致；
+    * ROOM：涂掉指针槽位后逐字节相同（GMS1 90,469/90,425 处、GMS2 37,215 处）；
+    * 幂等：把重建结果再重建一遍，三个样本字节完全相同；
+    * 布局：块长度字段 == UTMT 实际读到的字节数（data.win/data1 零告警）；
+    * PATH / OPTN：条目与常量表逐项相同（这两块本来就没有绝对指针）。
+
+0.15 那一套（me/formats/gamemaker_rebuild.py 的 diagnose/repair_*）仍然保留，
+是 --repair 在「全量重建不可用」时的退路。
