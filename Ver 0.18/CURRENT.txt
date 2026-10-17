@@ -1169,3 +1169,31 @@ same_line_better 也不再成立，两条断言失真。改成在测试里把本
 0.18E Beta 00090（upd.local_version 打桩），断言与当前标签彻底解耦。
 
 自测：全量 35/35 通过（含 test_update 9.7s、test_samples 89.3s）。
+
+发行落地（2026-10-18 00:07 +08:00）：
+
+  Release: https://github.com/ShatteredDetermination/True-MultiExtractor/releases/tag/v0.18R
+  id 415912957，draft=False，prerelease=False，正文取仓库里的 RELEASE-0.18R.md
+  资产（state=uploaded）：
+    MultiExtractor-0.18R-win64.zip   53,805,473 B
+    UpdatePack.zip                   53,803,961 B
+
+  git：main = fa92a86（release: V0.18R），tag v0.18R 是 annotated tag（ca61d7f），
+  指向 fa92a86；之后补一条 32f745a（发行说明入库）。
+
+发完之后的四道验证（都是真网络，不是自测桩）：
+
+  1. API 复查 release：tag/name/draft/prerelease/资产大小全对；
+     https://api.github.com/repos/.../releases/tags/v0.18R -> 2 个资产 uploaded。
+  2. raw 清单：curl https://raw.githubusercontent.com/.../main/version.json
+     -> status 200，latest_stable=0.18R，latest_beta 空，
+        download_url 指 v0.18R/UpdatePack.zip，sha256 与本地一致。
+  3. 打包版 CLI 实跑：dist/MultiExtractor/MultiExtractorCLI.exe --update stable --json
+     -> 本地 0.18R Beta 00098，远端稳定版 0.18R，结论「已是最新（按通道选择稳定版）」，
+        exit 0。拉清单用了 7.0 秒（3 秒超时 + 重试，这台机器直连 GitHub 就这速度）。
+  4. 资产下载校验：curl 下 UpdatePack.zip，53,803,961 B 一个字节不差，
+     sha256 = 1ba49d2f…ebd3d，与 version.json 里的完全一致。
+     耗时 1767 秒（约 30 KB/s）—— 这台机器直连 GitHub 很慢，但下载本身没断。
+
+顺带清掉的东西：发行前那次 GUI 实例（PID 10508，跑的是发行前的 dist）已退出；
+_temp 下的 me_pack_test / me_upd_live / me_dl_updatepack.zip 都是验证用临时目录。
