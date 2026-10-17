@@ -16,6 +16,7 @@
   工具目录；其余是**本次会话**的开关（与命令行参数对应）。
 """
 
+import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -210,8 +211,26 @@ def _settings_rows(ctx: Context) -> List[str]:
     ]
 
 
+def _installed_count(text: str) -> int:
+    """从 `4/4 已安装` 里取 4（取不出来算 -1，不参与比较）。"""
+    m = re.match(r"(\d+)/\d+", text or "")
+    return int(m.group(1)) if m else -1
+
+
+# 上一次面板上显示的工具数：只用来发现「会话期间被别的程序删了」。
+_LAST_TOOLS = {"text": "", "n": -1}
+
+
 def render_settings(ctx: Context) -> None:
     rows = _settings_rows(ctx)
+    now = tools_summary()
+    prev_n = _LAST_TOOLS["n"]
+    now_n = _installed_count(now)
+    if prev_n > now_n >= 0:
+        # 面板没动过工具根，数量却掉了：多半是外部进程（杀软/清理脚本）删了文件
+        ui.warn(f"外部工具减少: {_LAST_TOOLS['text']} -> {now}")
+    _LAST_TOOLS["text"], _LAST_TOOLS["n"] = now, now_n
+
     ui.sep()
     ui.info("[设置]")
     for i, row in enumerate(rows, 1):

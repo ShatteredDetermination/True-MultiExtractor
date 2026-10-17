@@ -256,6 +256,28 @@ def test_settings():
         check("检查外部工具" in rows and "下载缺失工具" in rows,
               "面板上有检查与下载两项")
 
+        # 面板重绘时工具数掉了（外部程序删了 tools/）-> 一条 warn
+        commands._LAST_TOOLS.update(text="", n=-1)
+        real_sum = commands.tools_summary
+        state = {"n": 0}
+
+        def fake_sum():
+            return "4/4 已安装" if state["n"] == 0 else "0/4 已安装（缺 utmt）"
+
+        commands.tools_summary = fake_sum
+        fake = FakeUi([])
+        restore = patch_ui(fake)
+        try:
+            commands.render_settings(ctx)          # 4/4
+            state["n"] = 1
+            commands.render_settings(ctx)          # 0/4 -> 报警
+        finally:
+            restore()
+            commands.tools_summary = real_sum
+            commands._LAST_TOOLS.update(text="", n=-1)
+        check("外部工具减少" in fake.text(), "工具在会话里变少会明说",
+              fake.text()[:300])
+
         # 摘要本身：把工具根换成空目录，必须如实报 0/4 且列名字
         real_tools_dir, real_root = tool_paths.TOOLS_DIR, tool_paths.ROOT
         tool_paths.TOOLS_DIR = tmp / "empty-tools"
