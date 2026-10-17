@@ -167,6 +167,22 @@ def _set_session_flag(ctx: Context, name: str, value: bool) -> None:
     ctx.dirty = True
 
 
+def tools_summary() -> str:
+    """外部工具的一句话状态：`3/4 就位（缺 assetstudio）`。"""
+    try:
+        installed = tool_paths.installed()
+        missing = tool_paths.missing()
+    except Exception:                       # noqa: BLE001 清单读不出来也不该炸
+        return "状态未知"
+    total = len(installed) + len(missing)
+    if total == 0:
+        return "清单为空"
+    text = f"{len(installed)}/{total} 就位"
+    if missing:
+        text += "（缺 " + ", ".join(missing) + "）"
+    return text
+
+
 def _settings_rows(ctx: Context) -> List[str]:
     exp, _ = _session_flag(ctx, "experimental")
     sel, _ = _session_flag(ctx, "want_self")
@@ -177,6 +193,7 @@ def _settings_rows(ctx: Context) -> List[str]:
     return [
         f"保存位置      {setup_ini.describe()}",
         f"外部工具目录  {tools}",
+        f"外部工具      {tools_summary()}",
         f"实验性功能    {_onoff(exp)}",
         f"自研打包核心  {_onoff(sel)}",
         f"不解容器      {_onoff(nodeep)}",
@@ -190,7 +207,9 @@ def render_settings(ctx: Context) -> None:
     ui.info("[设置]（改完立即生效；1、2 会写进配置文件）")
     for i, row in enumerate(rows, 1):
         ui.detail(f"  [{i}] {row}")
-    ui.detail("  [7] 清空工具目录（回到默认）")
+    ui.detail("  [8] 检查外部工具（缺哪个、怎么补）")
+    ui.detail("  [9] 自动下载缺失的工具")
+    ui.detail("  [10] 清空工具目录（回到默认）")
     ui.detail("  [0] 返回")
 
 
@@ -206,19 +225,25 @@ def cmd_settings(ctx: Context, _argv: List[str]) -> None:
         elif raw == "2":
             _set_tools_dir()
         elif raw == "3":
+            _show_tool_report()
+        elif raw == "4":
             _toggle(ctx, "experimental",
                     "实验性功能是换自研通道的总闸；关掉它单独开自研也不会生效")
-        elif raw == "4":
-            _toggle(ctx, "want_self", "自研核心需要实验性功能同时打开")
         elif raw == "5":
-            _toggle(ctx, "no_deep", "开了就只收集散落文件，不进容器")
+            _toggle(ctx, "want_self", "自研核心需要实验性功能同时打开")
         elif raw == "6":
-            _toggle(ctx, "keep_work", "开了会保留 work/ 中间产物（占地方）")
+            _toggle(ctx, "no_deep", "开了就只收集散落文件，不进容器")
         elif raw == "7":
+            _toggle(ctx, "keep_work", "开了会保留 work/ 中间产物（占地方）")
+        elif raw == "8":
+            _show_tool_report()
+        elif raw == "9":
+            _download_tools(ctx)
+        elif raw == "10":
             tool_paths.clear_override_dir()
             ui.ok("已清空工具目录，回到默认位置")
         else:
-            ui.warn("按 0-7 选")
+            ui.warn("按 0-10 选")
 
 
 def _toggle(ctx: Context, name: str, hint: str = "") -> None:
@@ -227,6 +252,32 @@ def _toggle(ctx: Context, name: str, hint: str = "") -> None:
     ui.ok(f"{name} -> {_onoff(not cur)}")
     if hint:
         ui.detail(hint)
+
+
+def _show_tool_report() -> None:
+    """完整的工具自检：清单来源、每个工具的期望路径、缺了怎么补。
+
+    直接复用 `main.cmd_tools()` —— 菜单与命令行必须是同一条路，
+    否则迟早出现「菜单说齐了、命令行说缺」这种对不上的事。
+    """
+    import main
+    main.cmd_tools()
+
+
+def _download_tools(_ctx: Context) -> None:
+    """自动下载缺失的工具。走软键 1 同一条路（含全量包询问）。
+
+    下完把结果落回面板摘要 —— 用户不用再按一次 3/8 才知道成没成。
+    """
+    from me.tools import softkey
+
+    before = tools_summary()
+    results, _used_pkg = softkey.download(ui)
+    after = tools_summary()
+    if after != before:
+        ui.info(f"外部工具: {before} -> {after}")
+    if not results and after == before:
+        ui.detail("什么都没下（要么已经不缺，要么被取消了）")
 
 
 def _set_output_path() -> None:

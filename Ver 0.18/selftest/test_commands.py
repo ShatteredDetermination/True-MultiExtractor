@@ -223,7 +223,7 @@ def test_settings():
         check(tool_paths.any_installed(), "认出了里面的工具")
 
         # ---- 3) 开关 ----
-        fake = FakeUi(["3", "4", "0"])
+        fake = FakeUi(["4", "5", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
@@ -235,7 +235,7 @@ def test_settings():
         check("[开]" in out, "面板上显示 [开]", out[-200:])
 
         # 再按一次就关掉
-        fake = FakeUi(["3", "0"])
+        fake = FakeUi(["4", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
@@ -243,23 +243,94 @@ def test_settings():
             restore()
         check(args.experimental is False, "再按一次关掉")
 
-        # ---- 4) 清空工具目录 ----
-        fake = FakeUi(["7", "0"])
+        # ---- 4) 外部工具：摘要 / 检查 / 下载 ----
+        fake = FakeUi(["0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
         finally:
             restore()
-        check(tool_paths.override_dir() is None, "7 把工具目录清回默认")
+        rows = fake.text()
+        check("外部工具" in rows and re.search(r"\d/4 就位", rows) is not None,
+              "面板上直接显示工具完整性（N/4 就位）", rows[:400])
+        check("检查外部工具" in rows and "自动下载缺失的工具" in rows,
+              "面板上有检查与下载两项")
 
-        # ---- 5) 非法选项 ----
-        fake = FakeUi(["9", "0"])
+        # 摘要本身：把工具根换成空目录，必须如实报 0/4 且列名字
+        real_tools_dir, real_root = tool_paths.TOOLS_DIR, tool_paths.ROOT
+        tool_paths.TOOLS_DIR = tmp / "empty-tools"
+        tool_paths.ROOT = tmp / "empty-app"
+        try:
+            # 这里 override 还指着「只有 utmt」的目录，所以正确答案是 1/4
+            check(commands.tools_summary().startswith("1/4 就位"),
+                  "只有 utmt 时摘要报 1/4", commands.tools_summary())
+            check(all(k in commands.tools_summary()
+                      for k in ("assetstudio", "evbunpack", "repak")),
+                  "并把缺的三个列出来", commands.tools_summary())
+        finally:
+            tool_paths.TOOLS_DIR, tool_paths.ROOT = real_tools_dir, real_root
+            tool_paths.clear_override_dir()
+
+        import main as _main
+        from me.tools import softkey as _softkey
+
+        real_tools_fn = _main.cmd_tools
+        called = []
+        _main.cmd_tools = lambda: called.append("tools") or 0
+        try:
+            fake = FakeUi(["8", "0"])
+            restore = patch_ui(fake)
+            try:
+                commands.handle("/settings", ctx)
+            finally:
+                restore()
+            check(called == ["tools"], "按 8 调用 cmd_tools（同一条路）", str(called))
+            check(called == ["tools"], "按 3 也走同一个报告")
+        finally:
+            _main.cmd_tools = real_tools_fn
+
+        real_dl = _softkey.download
+        dl_calls = []
+
+        def fake_download(ui_obj, allow_package=None):
+            dl_calls.append(allow_package)
+            ui_obj.ok("（假装下载完成）")
+            tree2 = tmp / "mytools"
+            (tree2 / "repak").mkdir(parents=True, exist_ok=True)
+            (tree2 / "repak" / "repak.exe").write_bytes(b"MZ")
+            return ([], False)
+
+        _softkey.download = fake_download
+        try:
+            fake = FakeUi(["9", "0"])
+            restore = patch_ui(fake)
+            try:
+                commands.handle("/settings", ctx)
+            finally:
+                restore()
+            check(dl_calls == [None], "按 9 调下载器（并允许它问全量包）",
+                  str(dl_calls))
+            check("假装下载完成" in fake.text(), "把下载器的输出透出来了")
+        finally:
+            _softkey.download = real_dl
+
+        # ---- 5) 清空工具目录 ----
+        fake = FakeUi(["10", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
         finally:
             restore()
-        check("按 0-7 选" in fake.text(), "乱按有提示", fake.text()[-120:])
+        check(tool_paths.override_dir() is None, "10 把工具目录清回默认")
+
+        # ---- 6) 非法选项 ----
+        fake = FakeUi(["99", "0"])
+        restore = patch_ui(fake)
+        try:
+            commands.handle("/settings", ctx)
+        finally:
+            restore()
+        check("按 0-10 选" in fake.text(), "乱按有提示", fake.text()[-120:])
 
         # ---- 6) 会话与会话标志同步 ----
         class Sess:
@@ -270,7 +341,7 @@ def test_settings():
 
         sess = Sess()
         ctx2 = commands.Context(args=Args(), session=sess)
-        fake = FakeUi(["5", "0"])
+        fake = FakeUi(["6", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx2)
