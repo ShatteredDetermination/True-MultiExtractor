@@ -25,7 +25,7 @@ APP_NAME = "True MultiExtractTool"
 #       S    Scrapped（已废弃）
 #   开发中是 "0.17WIP"，做好了就是 "0.17R" —— 同一版本线只换后缀。
 #   开下一条线才改版本线数字（"0.18WIP"），编号始终单调累加。
-VERSION = "0.18E Beta 00096"
+VERSION = "0.18E Beta 00097"
 AUTHOR = "Resolved-Patient"
 
 # 是否被打包成 exe（PyInstaller 会设置 sys.frozen）。
