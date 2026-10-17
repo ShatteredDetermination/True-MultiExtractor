@@ -148,7 +148,7 @@ def _unpack_third(ctx: Context, target: Path, work: Path) -> None:
     if tool is None:
         raise EngineError(
             "缺少 evbunpack，无法脱 Enigma Virtual Box 壳。\n"
-            "      修复：python tools/setup_tools.py evbunpack")
+            f"      {tool_paths.repair_hint('evbunpack')}")
 
     if ctx.verbose:
         # 这一步实测要 30 秒上下，期间不给点动静用户会以为卡死然后按 Ctrl+C

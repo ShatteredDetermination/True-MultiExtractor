@@ -9,7 +9,7 @@
 
     1  自动下载缺失的外部工具 —— 程序自己下、自己解压、自己验（见 fetch.py）
     2  扫描本机目录，自动找工具 —— 在常见位置找同名 exe
-    3  手动指定工具目录        —— 写 toolsdir.ini
+    3  指定工具根目录        —— 写 toolsdir.ini
     4  仅用自研核心继续        —— 本次会话强制自研，不再提示
 
 按 1 不是「给你个链接」，是真的把文件取回来：有直链的走直链（按镜像顺序
@@ -27,10 +27,10 @@ from me.tools import manifest as mf
 from me.tools import paths
 
 KEYS = (
-    ("1", "自动下载缺失的外部工具（程序自己下、自己装）"),
-    ("2", "扫描本机目录，自动找工具"),
-    ("3", "手动指定工具目录"),
-    ("4", "仅用自研核心继续（第三方通道不可用）"),
+    ("1", "下载缺失工具"),
+    ("2", "扫描本机工具"),
+    ("3", "指定工具根目录"),
+    ("4", "仅用自研核心"),
 )
 
 # 扫描时最多往下走几层，别把整个 C 盘翻一遍
@@ -118,11 +118,10 @@ def download(ui, allow_package: Optional[bool] = None):
     """
     missing = fetch.missing_keys()
     if not missing:
-        ui.ok("外部工具都在，不用下载")
+        ui.ok("外部工具齐全，无需下载")
         return [], False
 
-    ui.step(f"要下载 {len(missing)} 个工具：{', '.join(missing)}")
-    ui.detail("直链失败的会自动换镜像重试；只有 .7z 的走全量包")
+    ui.step("下载: " + ", ".join(missing))
 
     def tick(done, total, name):
         # 有总长才画百分比；没有就按已下字节数报（Content-Length 缺失很常见）
@@ -155,9 +154,9 @@ def download(ui, allow_package: Optional[bool] = None):
             ui.warn("清单里的全量包地址不是 zip，没法自动取")
 
     if paths.any_installed():
-        ui.ok("至少一个工具已就位，第三方通道可用")
+        ui.ok("外部工具可用")
     else:
-        ui.warn("还是没装成，可以选 [2] 扫本机、[3] 指定目录，或 [4] 只用自研")
+        ui.warn("外部工具仍缺失: [2] 扫描 [3] 指定根目录 [4] 仅自研")
     return results, used_pkg
 
 
@@ -174,13 +173,14 @@ def render(ui) -> str:
     """打印软键菜单并等一次选择。返回动作名。"""
     man = mf.snapshot()
     ui.sep()
-    ui.warn("没有找到任何外部工具，清单来自内置兜底（既没网也没缓存）")
+    ui.warn("未安装外部工具")
+    ui.detail(mf.status_line(man))
     if man.full_package:
         ui.detail(f"全量包: {man.full_package}")
-    ui.info("软键（直接按数字）：")
+    ui.info("软键:")
     for key, label in KEYS:
         ui.detail(f"[{key}] {label}")
-    ui.detail("（也可以直接输指令，如 /settings 进设置、/help 看全部）")
+    ui.detail("输入 /help 列出指令")
     return "ask"
 
 
@@ -211,30 +211,29 @@ def handle(ui, action: str) -> str:
         return "ok"
 
     if action == "scan":
-        ui.step("扫描常见目录 ...")
+        ui.step("扫描 ...")
         hit = scan()
         if hit is None:
-            ui.warn("没扫到工具；可以选 [1] 下载全量包，或 [3] 手动指定")
+            ui.warn("未找到工具")
             return "ok"
         if adopt(hit):
-            ui.ok(f"已认出工具根目录: {hit}")
+            ui.ok(f"工具根目录: {hit}")
             return "ok"
-        ui.warn(f"目录里没凑齐工具: {hit}")
+        ui.warn(f"工具不全: {hit}")
         return "ok"
 
     if action == "pick":
-        ui.info("把工具根目录指过来（含 utmt/ assetstudio/ 的那一层）")
-        raw = ui.clean_input(ui.ask("目录"))
+        raw = ui.clean_input(ui.ask("工具根目录"))
         if not raw:
             return "ok"
         if adopt(Path(raw)):
-            ui.ok(f"已记住: {raw}")
+            ui.ok(f"工具根目录: {raw}")
         else:
-            ui.warn(f"这个目录下没找到任何工具: {raw}")
+            ui.warn(f"未找到工具: {raw}")
         return "ok"
 
     if action == "self":
-        ui.ok("本次会话只用自研核心；第三方通道已关闭")
+        ui.ok("仅用自研核心")
         return "self"
 
     return ""
@@ -248,11 +247,11 @@ def run(ui) -> str:
         if action == "quit":
             return "quit"
         if not action:
-            ui.warn("按 1 / 2 / 3 / 4")
+            ui.warn("范围 1-4")
             continue
         res = handle(ui, action)
         if res == "self":
             return "self"
         if paths.any_installed():
-            ui.ok("工具已就位，继续")
+            ui.ok("外部工具可用")
             return "ok"

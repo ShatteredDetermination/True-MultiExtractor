@@ -582,11 +582,10 @@ def cmd_tools() -> int:
     if missing:
         ui.sep()
         ui.info(f"缺失 {missing} 个工具。{tool_paths.repair_hint()}")
-        ui.info(f"全量包（含 tools/）: {tool_paths.download_hint()}")
+        ui.info(f"全量包: {tool_paths.download_hint()}")
         # 打包版里写「python main.py」是错的 —— 用户没有 Python，也没有 .py
         # repair_hint 已经把「让程序自己下」那条说了，这里只说剩下的两条路
-        ui.detail(f"或：把已有的 tools/ 目录指过来 → {_self_invocation()}"
-                  " --tools-dir <目录>")
+        ui.detail(f"或 --tools-dir <目录>（{_self_invocation()}）")
     else:
         ui.ok("外部工具齐全")
     ui.sep()
@@ -625,7 +624,7 @@ def cmd_tools_get(keys, allow_full: bool = False) -> int:
 
     wanted = list(keys) if keys else fetch.missing_keys()
     if not wanted:
-        ui.ok("外部工具已经齐全，不用下载")
+        ui.ok("外部工具齐全，无需下载")
         events.emit("end", exit=config.EXIT_OK)
         return config.EXIT_OK
 
@@ -647,7 +646,7 @@ def cmd_tools_get(keys, allow_full: bool = False) -> int:
         wanted, log=lambda m: ui.detail(m), tick=tick,
         allow_package=allow_full)
     if used_pkg:
-        ui.info("（其中有的来自全量包）")
+        ui.info("来源: 全量包")
 
     ui.sep()
     for res in results:
@@ -659,16 +658,14 @@ def cmd_tools_get(keys, allow_full: bool = False) -> int:
     left = [r.key for r in results if not r.ok]
     if left:
         ui.sep()
-        ui.warn(f"还缺 {len(left)} 个: {', '.join(left)}")
+        ui.warn(f"仍缺 {len(left)} 个: {', '.join(left)}")
         if not allow_full:
-            ui.info("其中有的只能从全量包取 —— 加 --tools-get-full 允许下全量包"
-                    "（约 140 MB，下过一次会缓存）")
-        ui.info(f"或手工放置：把工具根目录指过来 → {_self_invocation()}"
-                " --tools-dir <目录>")
+            ui.info("加 --tools-get-full 可用全量包（约 140 MB，下过一次会缓存）")
+        ui.info(f"或 --tools-dir <目录>（{_self_invocation()}）")
         events.emit("end", exit=config.EXIT_TOOL)
         return config.EXIT_TOOL
 
-    ui.ok("全部就位")
+    ui.ok("外部工具齐全")
     events.emit("end", exit=config.EXIT_OK)
     return config.EXIT_OK
 
@@ -727,15 +724,14 @@ def cmd_setup() -> int:
     path = setup_ini.setup_path()
     cfg = setup_ini.load()
 
-    ui.ok(f"文件位置: {path}")
+    ui.ok(f"setup.ini: {path}")
     if not path.exists():
         ui.warn("文件不存在，写入失败，使用内置默认值")
     if cfg["error"]:
         ui.warn(f"配置异常: {cfg['error']}")
 
     ui.sep()
-    ui.info(f"保存路径: {cfg[setup_ini.KEY_PATH]}")
-    ui.detail(f"实际位置: {setup_ini.output_root()}")
+    ui.info(f"输出目录: {setup_ini.output_root()}")
     events.emit("config", file=str(path), exists=path.exists(),
                 out_path=cfg[setup_ini.KEY_PATH],
                 out_root=str(setup_ini.output_root()),
@@ -795,7 +791,7 @@ def interactive(args) -> int:
     ctx = commands.Context(args=args)
     ui.set_command_hook(lambda raw: commands.handle(raw, ctx))
     # 第一次进菜单就把「怎么求助」说清楚：斜杠指令不好猜，得提醒。
-    ui.info(f"提示：{ui.HELP_HINT}")
+    ui.info(ui.HELP_HINT)
     _warn_missing_tools()
 
     # 首次无网无缓存：先过一遍软键菜单，避免用户对着「第三方通道不可用」
@@ -825,7 +821,7 @@ def interactive(args) -> int:
         if not sess.analyzed:
             # 步骤 1：先分析，不分析就不给提取/重建 —— 避免用户在没识别之前乱按
             ui.info(f"目标: {sess.target}")
-            ui.detail("先分析目标，再决定做什么（分析走的是 --detect 同一条路径）")
+            ui.detail("先分析目标，再决定做什么")
             items = menu_flow.pre_analyze_options()
             idx = ui.menu("请选择:", [label for label, _k in items])
             act = items[idx][1]
@@ -852,7 +848,7 @@ def interactive(args) -> int:
 
         # 步骤 2：分析完，按引擎能力给菜单
         ui.info(menu_flow.result_banner(sess, det))
-        ui.info(f"保存到: {setup_ini.describe()}")
+        ui.info(f"输出目录: {setup_ini.describe()}")
         if menu_flow.channel_switchable(sess.effective_engine):
             ui.info(f"拆包通道: {menu_flow.channel_label(sess)}"
                     f" —— {menu_flow.channel_detail(sess)}")
@@ -996,20 +992,18 @@ def _ask_target():
     """
     while True:
         # ui.ask 已经去过引号/空白/BOM，这里再兜一次底（用户可能从别处粘进来）
-        raw = ui.clean_input(ui.ask("请输入游戏路径（文件或目录，/help 看指令）"))
+        raw = ui.clean_input(ui.ask("目标路径"))
         if raw.startswith("/"):
             if ui.command(raw) == "quit":
                 raise SystemExit(config.EXIT_OK)
-            ui.detail("（输入路径继续，或 /help 看指令）")
             continue
         if not raw:
             ui.error("未输入路径")
             return None
         target = Path(raw)
         if not target.exists():
-            # 打错了不该被一脚踢出去：说清楚 + 提醒能求助，然后重问
+            # 打错了不该被一脚踢出去：说清楚，然后重问
             ui.error(f"路径不存在: {target}")
-            ui.detail(f"检查一下路径；{ui.HELP_HINT}")
             continue
         return target
 
@@ -1121,7 +1115,7 @@ def _entry(argv=None) -> int:
         if i + 1 < len(raw_args):
             target = raw_args[i + 1]
             p = tool_paths.set_override_dir(target)
-            print(f"[i] 已记住工具目录: {target}")
+            print(f"[i] 工具根目录: {target}")
             print(f"[i] 配置文件: {p}")
 
     # 让 setup.ini 一开始就出现在程序旁边，用户不用先去别处找格式

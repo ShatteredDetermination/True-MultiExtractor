@@ -335,7 +335,7 @@ def _extract_third(ctx: Context, target: Path, out: Outcome) -> Outcome:
     if cli is None:
         raise EngineError(
             "缺少 AssetStudio CLI，无法提取 Unity 资源。\n"
-            "      修复：python tools/setup_tools.py assetstudio")
+            f"      {tool_paths.repair_hint('assetstudio')}")
 
     src, how = find_input(target)
     if src is None:

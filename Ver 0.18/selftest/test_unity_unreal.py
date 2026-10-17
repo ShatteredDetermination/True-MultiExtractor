@@ -247,7 +247,7 @@ def test_missing_cli(tmp: Path):
             msg = str(exc)
             print("      EngineError: " + msg.replace("\n", "\n                   "))
             check("Unity 错误信息含修复命令",
-                  "setup_tools.py assetstudio" in msg)
+                  "--tools-get assetstudio" in msg)
             check("Unity 错误信息说明缺什么", "AssetStudio" in msg)
 
         uctx = make_ctx(make_fake_unreal(tmp / "unreal_case"),
@@ -259,7 +259,7 @@ def test_missing_cli(tmp: Path):
             msg = str(exc)
             print("      EngineError: " + msg.replace("\n", "\n                   "))
             check("Unreal 错误信息含修复命令",
-                  "setup_tools.py repak" in msg)
+                  "--tools-get repak" in msg)
     finally:
         tool_paths.TOOLS_DIR = real_tools
 

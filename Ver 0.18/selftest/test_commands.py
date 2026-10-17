@@ -201,7 +201,7 @@ def test_settings():
             restore()
         txt = fake.text()
         check("[设置]" in txt, "画出了设置面板", txt[:120])
-        check("保存位置" in txt and "外部工具目录" in txt, "两项持久化设置都在")
+        check("输出目录" in txt and "工具根目录" in txt, "两项持久化设置都在")
         check((tmp / "app" / "setup.ini").exists(), "setup.ini 写出来了")
         cfg = setup_ini.load()
         check(cfg[setup_ini.KEY_PATH] == "D:\\Out\\Game",
@@ -251,9 +251,9 @@ def test_settings():
         finally:
             restore()
         rows = fake.text()
-        check("外部工具" in rows and re.search(r"\d/4 就位", rows) is not None,
-              "面板上直接显示工具完整性（N/4 就位）", rows[:400])
-        check("检查外部工具" in rows and "自动下载缺失的工具" in rows,
+        check("外部工具" in rows and re.search(r"\d/4 已安装", rows) is not None,
+              "面板上直接显示工具完整性（N/4 已安装）", rows[:400])
+        check("检查外部工具" in rows and "下载缺失工具" in rows,
               "面板上有检查与下载两项")
 
         # 摘要本身：把工具根换成空目录，必须如实报 0/4 且列名字
@@ -262,7 +262,7 @@ def test_settings():
         tool_paths.ROOT = tmp / "empty-app"
         try:
             # 这里 override 还指着「只有 utmt」的目录，所以正确答案是 1/4
-            check(commands.tools_summary().startswith("1/4 就位"),
+            check(commands.tools_summary().startswith("1/4 已安装"),
                   "只有 utmt 时摘要报 1/4", commands.tools_summary())
             check(all(k in commands.tools_summary()
                       for k in ("assetstudio", "evbunpack", "repak")),
@@ -314,14 +314,14 @@ def test_settings():
         finally:
             _softkey.download = real_dl
 
-        # ---- 5) 清空工具目录 ----
+        # ---- 5) 重置工具根目录 ----
         fake = FakeUi(["10", "0"])
         restore = patch_ui(fake)
         try:
             commands.handle("/settings", ctx)
         finally:
             restore()
-        check(tool_paths.override_dir() is None, "10 把工具目录清回默认")
+        check(tool_paths.override_dir() is None, "10 把工具根目录清回默认")
 
         # ---- 6) 非法选项 ----
         fake = FakeUi(["99", "0"])
@@ -330,7 +330,7 @@ def test_settings():
             commands.handle("/settings", ctx)
         finally:
             restore()
-        check("按 0-10 选" in fake.text(), "乱按有提示", fake.text()[-120:])
+        check("范围 0-10" in fake.text(), "乱按有提示", fake.text()[-120:])
 
         # ---- 6) 会话与会话标志同步 ----
         class Sess:
@@ -392,20 +392,18 @@ def test_live():
         check("实验性功能" in out and "[开]" in out, "开关能改", out[-600:])
         check(code in (0, 1), f"退出码正常（{code}）")
         # 提醒：一进来就该知道 /help，路径打错也不该被踢出去
-        check("输入 /help 看指令" in out, "启动就有 /help 提醒", out[:600])
-        check("请输入游戏路径" in out and "/help 看指令" in out,
-              "路径输入行带着提示", out[:600])
+        check("输入 /help 列出指令" in out, "启动就有 /help 提醒", out[:600])
+        check("目标路径" in out, "路径输入行是标准术语", out[:600])
 
         code_b, out_b = run_interactive("C:\\no\\such\\dir\n/quit\n")
         check("路径不存在" in out_b, "打错路径会报出来", out_b[:400])
-        check("检查一下路径" in out_b, "并提醒可以 /help", out_b[:600])
-        check(out_b.count("请输入游戏路径") >= 2,
-              "打错之后会重问，而不是直接退出", str(out_b.count("请输入游戏路径")))
+        check(out_b.count("目标路径") >= 2,
+              "打错之后会重问，而不是直接退出", str(out_b.count("目标路径")))
 
         section("5. 真跑：主菜单里敲 /help")
         feed2 = "\n".join([str(tmp / "game"), "/help", "/channels", "0", "0", ""])
         code2, out2 = run_interactive(feed2)
-        check("指令（行首带斜杠）" in out2, "菜单里也认指令", out2[:400])
+        check("指令：" in out2, "菜单里也认指令", out2[:400])
         check("/settings" in out2, "/help 列出了 /settings")
         check("gamemaker" in out2, "/channels 跑起来了", out2[-400:])
 

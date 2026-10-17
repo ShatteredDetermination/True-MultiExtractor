@@ -252,6 +252,10 @@ def _run(feed: str, timeout=180):
     env = dict(os.environ)
     env["ME_NO_SOFTKEY"] = "1"   # 自测直接进正式菜单，别被首次无网的软键挡住
     env.setdefault("ME_NO_NET", "1")
+    # 喂进去的是 UTF-8 字节，子进程也必须按 UTF-8 读 stdin ——
+    # 否则中文路径会按控制台代码页（cp936）解成乱码，被当成「路径不存在」。
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     proc = subprocess.run([sys.executable, str(ROOT / "main.py")],
                           input=feed.encode("utf-8"), capture_output=True,
                           timeout=timeout, cwd=str(ROOT), env=env)

@@ -348,7 +348,7 @@ def smoke_test(dest: Path, slim: bool = False) -> None:
 
     log("冒烟自测：--setup")
     out, _code = run(["--setup"])
-    if "保存路径" not in out:
+    if "输出目录" not in out:
         die("--setup 输出异常:\n" + out)
     # 确认它读的是发布目录里那份 setup.ini，而不是别处的
     if str(dest) not in out:

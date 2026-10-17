@@ -230,7 +230,7 @@ def _extract_third(ctx: Context, paks: List[Path], out: Outcome) -> int:
     if cli is None:
         raise EngineError(
             "缺少 repak，无法解包 Unreal .pak。\n"
-            "      修复：python tools/setup_tools.py repak")
+            f"      {tool_paths.repair_hint('repak')}")
 
     aes_key = os.environ.get(AES_ENV, "").strip() or None
     if aes_key:

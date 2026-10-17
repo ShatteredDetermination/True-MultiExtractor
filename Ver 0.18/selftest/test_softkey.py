@@ -196,7 +196,7 @@ def main() -> int:
             ui = FakeUi()
             check(softkey.handle(ui, "download") == "ok", "返回 ok（可继续）")
             out1 = ui.text()
-            check("要下载" in out1, "先说清要下几个", out1[:200])
+            check("下载" in out1, "先说清要下哪些", out1[:200])
             check("下载完成" in out1, "报告下载完成", out1[:300])
             check("解压" in out1 or "假装从网上" in out1 or "下载" in out1,
                   "有过程输出", out1[:300])
@@ -221,7 +221,7 @@ def main() -> int:
         check(softkey.scan() is None, "空目录 -> 扫不到")
         ui = FakeUi()
         check(softkey.handle(ui, "scan") == "ok", "扫不到也返回 ok（不崩）")
-        check("没扫到" in ui.text(), "明说没扫到", ui.text())
+        check("未找到工具" in ui.text(), "明说没扫到", ui.text())
         check(softkey.needed() is True, "还是该弹（工具没就位）")
 
         # 再验「扫到了」这一支
@@ -233,7 +233,7 @@ def main() -> int:
 
         ui = FakeUi()
         check(softkey.handle(ui, "scan") == "ok", "认领后返回 ok")
-        check("已认出" in ui.text(), "提示认得这个目录", ui.text())
+        check("工具根目录" in ui.text(), "提示认得这个目录", ui.text())
         check(paths.any_installed() is True, "工具就位")
         check(paths.find("utmt") is not None, "utmt 找得到", str(paths.find("utmt")))
         check(softkey.needed() is False, "工具就位后不再弹")
@@ -247,12 +247,12 @@ def main() -> int:
         softkey._scan_roots = real_scan_roots
 
         # ---------------------------------------------------------- 键 3
-        print("\n[7] 键 3：手动指定目录")
+        print("\n[7] 键 3：指定工具根目录")
         paths.clear_override_dir()
         check(not paths.any_installed(), "清掉后回到没工具")
         ui = FakeUi([str(tmp / "nosuchdir")])
         check(softkey.handle(ui, "pick") == "ok", "目录不存在也返回 ok")
-        check("没找到" in ui.text(), "明说这个目录不行", ui.text())
+        check("未找到工具" in ui.text(), "明说这个目录不行", ui.text())
         check(not paths.any_installed(), "没认领成功")
 
         ui = FakeUi([""])
@@ -261,7 +261,7 @@ def main() -> int:
 
         ui = FakeUi([str(tree)])
         check(softkey.handle(ui, "pick") == "ok", "指定能用的目录 -> ok")
-        check("已记住" in ui.text(), "提示已记住", ui.text())
+        check("工具根目录" in ui.text(), "提示已记住工具根目录", ui.text())
         check(paths.any_installed() is True, "这一次认领成功")
 
         # ---------------------------------------------------------- 键 4
@@ -301,7 +301,7 @@ def main() -> int:
         mf.reset_for_tests()
         ui = FakeUi(["9", "4"])          # 先按错，再按 4
         check(softkey.run(ui) == "self", "先错后 4 -> self")
-        check("按 1 / 2 / 3 / 4" in ui.text(), "非法输入有提示", ui.text())
+        check("范围 1-4" in ui.text(), "非法输入有提示", ui.text())
         check(ui.answers == [], "两次输入都被消费掉")
 
         paths.clear_override_dir()
@@ -309,7 +309,7 @@ def main() -> int:
         softkey._scan_roots = lambda: [tmp / "somewhere"]
         ui = FakeUi(["2"])               # 按键 2 扫到工具，循环应当自己结束
         check(softkey.run(ui) == "ok", "扫描成功后 run 返回 ok")
-        check("工具已就位" in ui.text(), "提示工具已就位", ui.text())
+        check("外部工具可用" in ui.text(), "提示外部工具可用", ui.text())
         softkey._scan_roots = real_scan_roots
 
         # ---------------------------------------------------------- adopt 本身

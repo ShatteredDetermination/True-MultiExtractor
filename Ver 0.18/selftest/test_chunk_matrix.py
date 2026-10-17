@@ -14,6 +14,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 控制台可能是 cp936：矩阵会打箭头之类的符号，先确保 stdout 能写 UTF-8，
+# 否则一行诊断信息就能把整个脚本打成「失败」。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -125,7 +132,7 @@ def main() -> int:
             check(got and not inside, f"{name}: UTMT 读完",
                   f"{first[:70]}")
             if inside:
-                print(f"         ↳ {first[:100]}")
+                print(f"         -> {first[:100]}")
     print("\n" + "=" * 74)
     print(f"  PASS {PASS}   FAIL {FAIL}（信息性矩阵：失败的块还没建模完）")
     print("=" * 74)

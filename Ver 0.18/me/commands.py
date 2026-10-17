@@ -22,18 +22,17 @@ from typing import Callable, Dict, List, Optional, Tuple
 from me import config, setup_ini, ui
 from me.tools import paths as tool_paths
 
-HELP_LINE = "指令（行首带斜杠）："
+HELP_LINE = "指令："
 
 # 指令表：名字 -> (一行说明, 处理函数的属性名)
 COMMANDS: Dict[str, Tuple[str, str]] = {
-    "help": ("列出所有指令", "cmd_help"),
-    "settings": ("设置：保存位置 / 工具目录 / 检查与下载外部工具 / 会话开关",
-                 "cmd_settings"),
-    "tools": ("看外部工具状态（缺了就提示怎么补）", "cmd_tools"),
-    "channels": ("看每个引擎的拆包通道", "cmd_channels"),
-    "setup": ("看 setup.ini 的位置与当前值", "cmd_setup"),
-    "update": ("检查在线更新", "cmd_update"),
-    "quit": ("退出交互菜单", "cmd_quit"),
+    "help": ("列出指令", "cmd_help"),
+    "settings": ("设置", "cmd_settings"),
+    "tools": ("外部工具状态", "cmd_tools"),
+    "channels": ("拆包通道", "cmd_channels"),
+    "setup": ("setup.ini 位置与值", "cmd_setup"),
+    "update": ("检查更新", "cmd_update"),
+    "quit": ("退出", "cmd_quit"),
 }
 
 ALIASES = {
@@ -108,7 +107,7 @@ def _show_commands() -> None:
     ui.info(HELP_LINE)
     for name, (desc, _fn) in COMMANDS.items():
         ui.detail(f"/{name:<10} {desc}")
-    ui.detail("也可以直接打 / 帮助、/设置（中文别名同样认）")
+    ui.detail("别名: /h /? /s /q /帮助 /设置 /退出")
 
 
 def cmd_help(_ctx: Context, _argv: List[str]) -> None:
@@ -169,7 +168,7 @@ def _set_session_flag(ctx: Context, name: str, value: bool) -> None:
 
 
 def tools_summary() -> str:
-    """外部工具的一句话状态：`3/4 就位（缺 assetstudio）`。"""
+    """外部工具的状态：`3/4 已安装（缺 assetstudio）`。"""
     try:
         installed = tool_paths.installed()
         missing = tool_paths.missing()
@@ -178,10 +177,19 @@ def tools_summary() -> str:
     total = len(installed) + len(missing)
     if total == 0:
         return "清单为空"
-    text = f"{len(installed)}/{total} 就位"
+    text = f"{len(installed)}/{total} 已安装"
     if missing:
         text += "（缺 " + ", ".join(missing) + "）"
     return text
+
+
+# 标签按「占 7 个汉字宽」对齐：全角空格补位，中英混排才不会左右跳。
+_LABEL_WIDTH = 7
+
+
+def _row(label: str, value: str) -> str:
+    pad = "　" * max(0, _LABEL_WIDTH - len(label))
+    return f"{label}{pad} {value}"
 
 
 def _settings_rows(ctx: Context) -> List[str]:
@@ -190,27 +198,27 @@ def _settings_rows(ctx: Context) -> List[str]:
     nodeep, _ = _session_flag(ctx, "no_deep")
     keep, _ = _session_flag(ctx, "keep_work")
     od = tool_paths.override_dir()
-    tools = str(od) if od is not None else f"{Path(config.ROOT) / 'tools'}（默认）"
+    tools = str(od) if od is not None else str(Path(config.ROOT) / "tools")
     return [
-        f"保存位置      {setup_ini.describe()}",
-        f"外部工具目录  {tools}",
-        f"外部工具      {tools_summary()}",
-        f"实验性功能    {_onoff(exp)}",
-        f"自研打包核心  {_onoff(sel)}",
-        f"不解容器      {_onoff(nodeep)}",
-        f"保留中间产物  {_onoff(keep)}",
+        _row("输出目录", str(setup_ini.output_root())),
+        _row("工具根目录", tools),
+        _row("外部工具", tools_summary()),
+        _row("实验性功能", _onoff(exp)),
+        _row("自研核心", _onoff(sel)),
+        _row("不解容器", _onoff(nodeep)),
+        _row("保留中间产物", _onoff(keep)),
     ]
 
 
 def render_settings(ctx: Context) -> None:
     rows = _settings_rows(ctx)
     ui.sep()
-    ui.info("[设置]（改完立即生效；1、2 会写进配置文件）")
+    ui.info("[设置]")
     for i, row in enumerate(rows, 1):
         ui.detail(f"  [{i}] {row}")
-    ui.detail("  [8] 检查外部工具（缺哪个、怎么补）")
-    ui.detail("  [9] 自动下载缺失的工具")
-    ui.detail("  [10] 清空工具目录（回到默认）")
+    ui.detail("  [8] 检查外部工具")
+    ui.detail("  [9] 下载缺失工具")
+    ui.detail("  [10] 重置工具根目录")
     ui.detail("  [0] 返回")
 
 
@@ -228,31 +236,28 @@ def cmd_settings(ctx: Context, _argv: List[str]) -> None:
         elif raw == "3":
             _show_tool_report()
         elif raw == "4":
-            _toggle(ctx, "experimental",
-                    "实验性功能是换自研通道的总闸；关掉它单独开自研也不会生效")
+            _toggle(ctx, "experimental", "实验性功能")
         elif raw == "5":
-            _toggle(ctx, "want_self", "自研核心需要实验性功能同时打开")
+            _toggle(ctx, "want_self", "自研核心")
         elif raw == "6":
-            _toggle(ctx, "no_deep", "开了就只收集散落文件，不进容器")
+            _toggle(ctx, "no_deep", "不解容器")
         elif raw == "7":
-            _toggle(ctx, "keep_work", "开了会保留 work/ 中间产物（占地方）")
+            _toggle(ctx, "keep_work", "保留中间产物")
         elif raw == "8":
             _show_tool_report()
         elif raw == "9":
             _download_tools(ctx)
         elif raw == "10":
             tool_paths.clear_override_dir()
-            ui.ok("已清空工具目录，回到默认位置")
+            ui.ok("工具根目录已重置")
         else:
-            ui.warn("按 0-10 选")
+            ui.warn("范围 0-10")
 
 
-def _toggle(ctx: Context, name: str, hint: str = "") -> None:
+def _toggle(ctx: Context, name: str, label: str) -> None:
     cur, _src = _session_flag(ctx, name)
     _set_session_flag(ctx, name, not cur)
-    ui.ok(f"{name} -> {_onoff(not cur)}")
-    if hint:
-        ui.detail(hint)
+    ui.ok(f"{label} {_onoff(not cur)}")
 
 
 def _show_tool_report() -> None:
@@ -273,19 +278,15 @@ def _download_tools(_ctx: Context) -> None:
     from me.tools import softkey
 
     before = tools_summary()
-    results, _used_pkg = softkey.download(ui)
+    softkey.download(ui)
     after = tools_summary()
     if after != before:
         ui.info(f"外部工具: {before} -> {after}")
-    if not results and after == before:
-        ui.detail("什么都没下（要么已经不缺，要么被取消了）")
 
 
 def _set_output_path() -> None:
-    cur = setup_ini.raw_output()
-    ui.info(f"当前保存路径: {cur}")
-    ui.detail("相对路径按程序目录算；也可以写 D:\\\\某处 这样的绝对路径")
-    raw = ui.clean_input(ui.ask("新的保存路径（回车=不改）"))
+    ui.info(f"输出目录: {setup_ini.output_root()}")
+    raw = ui.clean_input(ui.ask("输出目录"))
     if not raw:
         return
     try:
@@ -293,14 +294,12 @@ def _set_output_path() -> None:
     except OSError as exc:
         ui.error(f"写 setup.ini 失败: {exc}")
         return
-    ui.ok(f"已写入 {p.name}：{raw}")
-    ui.detail(f"实际位置: {setup_ini.output_root()}")
+    ui.ok(f"输出目录: {setup_ini.output_root()}")
 
 
 def _set_tools_dir() -> None:
     od = tool_paths.override_dir()
-    ui.info(f"当前工具目录: {od if od is not None else '（默认）'}")
-    ui.detail("填含 utmt/ assetstudio/ 的那一层；回车不改")
+    ui.info(f"工具根目录: {od if od is not None else '默认'}")
     raw = ui.clean_input(ui.ask("工具根目录"))
     if not raw:
         return
@@ -310,8 +309,7 @@ def _set_tools_dir() -> None:
         return
     tool_paths.set_override_dir(d)
     if tool_paths.any_installed():
-        ui.ok(f"已记住: {d}")
-        ui.detail("找到: " + ", ".join(tool_paths.installed()))
+        ui.ok(f"工具根目录: {d}")
+        ui.detail("已找到: " + ", ".join(tool_paths.installed()))
     else:
-        ui.warn(f"这个目录下没找到工具: {d}")
-        ui.detail("期望里面有 utmt/UndertaleModCli.exe 之类；写进去了，装上工具后自动生效")
+        ui.warn(f"未找到工具: {d}")

@@ -147,11 +147,9 @@ def repair_hint(key: str = "") -> str:
     去浏览器里点：软键 1 与这个参数是同一条路（me/tools/fetch.py）。
     """
     if IS_FROZEN:
-        exe = "MultiExtractorCLI.exe"
-        return (f"修复：让程序自己下 → {exe} --tools-get"
-                "（只有 .7z 的那个可加 --tools-get-full）")
+        return "修复: MultiExtractorCLI.exe --tools-get"
     cmd = f"python main.py --tools-get {key}".strip()
-    return f"修复：{cmd}（或 python tools/setup_tools.py {key}）"
+    return f"修复: {cmd}"
 
 
 def download_hint() -> str:

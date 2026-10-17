@@ -29,7 +29,7 @@ DEFAULT_OUTPUT = "Extract Resources"
 # 自动生成时写进文件的内容。里面的注释就是给用户看的说明书。
 _TEMPLATE = """\
 [Output]
-; path = 保存目录
+; path = 输出目录
 path = {default}
 """
 
@@ -98,7 +98,7 @@ def load() -> dict:
     cfg = {KEY_PATH: DEFAULT_OUTPUT, "error": ""}
     p = ensure()
     if not p.exists():
-        cfg["error"] = f"未能读取 {SETUP_NAME}，使用内置默认保存路径"
+        cfg["error"] = f"未能读取 {SETUP_NAME}，使用内置默认输出目录"
         return cfg
 
     # 关掉 % 插值：Windows 路径里真可能出现 %，开了插值会直接报错
@@ -107,12 +107,12 @@ def load() -> dict:
         parser.read_string(_read_text(p))
     except configparser.Error as exc:
         cfg["error"] = (f"{SETUP_NAME} 格式异常（{type(exc).__name__}），"
-                        f"已退回默认保存路径 {DEFAULT_OUTPUT!r}")
+                        f"已退回默认输出目录 {DEFAULT_OUTPUT!r}")
         return cfg
 
     if not parser.has_option(SECTION, KEY_PATH):
         cfg["error"] = (f"{SETUP_NAME} 缺少 [{SECTION}] {KEY_PATH}，"
-                        f"已退回默认保存路径 {DEFAULT_OUTPUT!r}")
+                        f"已退回默认输出目录 {DEFAULT_OUTPUT!r}")
         return cfg
 
     val = parser.get(SECTION, KEY_PATH).strip()
@@ -121,7 +121,7 @@ def load() -> dict:
         val = val[1:-1].strip()
     if not val:
         cfg["error"] = (f"[{SECTION}] {KEY_PATH} 为空，"
-                        f"已退回默认保存路径 {DEFAULT_OUTPUT!r}")
+                        f"已退回默认输出目录 {DEFAULT_OUTPUT!r}")
         return cfg
 
     cfg[KEY_PATH] = val
@@ -170,9 +170,5 @@ def set_output(value: str) -> Path:
 
 
 def describe() -> str:
-    """给用户看的一行摘要。"""
-    raw = raw_output()
-    resolved = output_root()
-    if str(resolved) == raw:
-        return raw
-    return f"{raw}  (-> {resolved})"
+    """给用户看的一行摘要：输出目录的绝对路径。"""
+    return str(output_root())
