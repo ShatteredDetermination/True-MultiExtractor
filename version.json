@@ -1,0 +1,8 @@
+{
+  "latest_stable": "0.17R",
+  "latest_beta": "0.18E",
+  "download_url": "https://github.com/ShatteredDetermination/True-MultiExtractor/releases/download/v0.17R/MultiExtractor_0.17R.zip",
+  "sha256": "3cdc3bde4aa2c07b7bdcb8fb693235633ce02ec670e777c8b98bb9b5fc08fe2c",
+  "changelog": "0.17R：自研 / 第三方两条拆包通道、GUI 与 CLI 同级分发。0.18E（公测）：Slim 微内核（包体 20 MB）、外部工具自动下载。",
+  "_note": "更新器只比较主版本号，E / Rc / S 后缀在比较时被剥离；sha256 是 download_url 那个文件的。"
+}

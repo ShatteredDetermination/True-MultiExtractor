@@ -1,0 +1,804 @@
+True MultiExtractTool —— V0.17 开发线（对外报 0.16E）
+==================================================
+
+**版本号规则（这一版起，以后都这样）**：开发线在验收通过前，一律报
+「上一个已发布版本号 + E」。本目录是 V0.17 开发线，`me/config.py` 里写的是
+`0.16E Beta NNNNN`；全部自测与两条通道的验收通过之后，才改成
+`0.17 Beta NNNNN`（同时 `python bump.py --release 0.17`）。
+外面看到的 0.16E 表示「0.17 还没做完」。
+
+已发布的 0.16 在 `../Ver 0.16`（内容 = 原 0.15E，只换标签）。
+
+版本关系：
+    Ver 0.13   加 GUI 调用接口（NDJSON 事件流、固定退出码）
+    Ver 0.14   自研 data.win 解析器；去掉 UTMT 依赖
+    Ver 0.15   原位重建（填回原 span）—— 已证明不可行，保留作参照
+    Ver 0.15E  全量重建（开发线标签）
+    Ver 0.16   0.15E 的发布版（全量重建）
+    Ver 0.17   本目录 —— 自研 / 第三方两条拆包通道
+
+本轮做了什么（V0.17 第一批）
+--------------------------
+1. 每个引擎都能选通道：默认**第三方**工具；**实验性功能 + 自研开关同时启用**
+   才换自研；**CTF 除外**（只有自研，不接第三方）。
+2. 判定只有一处：`me/channel.py`。引擎模块只读 `ctx.use_self`，不自己判开关。
+3. GameMaker 补上第三方通道：`UndertaleModCli.exe dump`（字符串 / GML / 纹理 /
+   精灵帧），解不出来自动退回自研；两边覆盖差异写进 notes。
+4. CLI：`--experimental` / `--self` / `--no-self` / `--channels`；
+   交互菜单多一项「拆包通道」，切过去时会连带打开实验性功能。
+5. GUI：CheckBox1（实验性总闸）+ CheckBox7（自研核心）→ 两个都勾才传
+   `--experimental --self`，日志多打一行「拆包通道: …」。
+6. 自测：`selftest/test_channel.py`（51 项）—— 真值表、接线、`--channels`、
+   端到端事件流。
+
+通道现状
+--------
+| 引擎 | 第三方 | 自研 |
+|---|---|---|
+| gamemaker | UTMT CLI | 已实现（另有音频/字体/路径/OPTN） |
+| godot / electron / rpgmaker | 不接 | 已实现 |
+| clickteam（CTF） | **不接**（除外） | 已实现 |
+| unreal | repak | 已实现 `me/formats/ue_pak.py`（pak v0–v9） |
+| enigma | evbunpack | 已实现 `me/formats/evb.py`（只读虚拟文件系统） |
+| unity | AssetStudio | 待补（V0.17 未完成） |
+
+`python main.py --channels` 随时查这张表。
+
+本轮第二批：Unreal 自研解析
+--------------------------
+`me/formats/ue_pak.py`：纯标准库读 `.pak`，不启动任何外部程序。
+
+* 文件尾 `FPakInfo` 用「找魔数 0x5A6F12E1 + 校验索引区间」定位，
+  不按版本硬编码尾部长度（实测各版本 44/172/204/205 字节都有）。
+* 索引字段宽度不写死：压缩方式 4 字节 / 1 字节、时间戳 0/8 字节等组合
+  逐个试，**要求恰好读完整个索引**才认。同一版本号下 repak 就写出两种长度
+  （V8A 1 字节、V8B 4 字节），真实 UE 也不保证只有一种。
+* 未压缩条目的数据在「条目偏移 + FPakEntry 头」之后，按版本算出头长；
+  压缩条目走块表，版本 5 起块偏移是相对条目起点的（加回偏移）——
+  这两条都是实测出来的，写错就会被解成别的文件的字节。
+* 压缩只解 zlib / gzip（标准库）；Oodle / Zstd / LZ4 明确报「解不了」并计数。
+* UE5 的 v10/v11（多层索引 + 位压缩条目）还没做：遇到抛
+  `UnsupportedVersion`，引擎把这条 pak 交回 repak，notes 里写明白。
+
+对照证据：`selftest/test_ue_pak.py`（24 项）—— 手写合成 pak（含 UTF-16 文件名）、
+畸形文件、v10/v11 报错，以及**真 repak 打包的 17 组样本**（V0–V9 × 未压缩/
+zlib/gzip）条目名与 repak list 完全一致、解出的字节与源文件逐字节相同。
+`selftest/test_unity_unreal.py` 另加 E3：同一个 pak 走 `ctx.channel="self"`，
+4 个文件全部逐字节一致。
+
+本轮第三批：Enigma 自研解析
+--------------------------
+`me/formats/evb.py`：只读 `.enigma1` 节里的虚拟文件系统，不启动 evbunpack。
+
+* PE 解析找 `.enigma1`；记录按「名字 UTF-16 + 名字后 58 字节固定字段」走，
+  下一条名字 = 本条名字 + 名字字节数 + 70。
+* 字段顺序全是从字节里量出来的：类型在名字后第 0 字节、原始长度第 3 字节、
+  属性（u32）第 35 字节、存储长度第 50 字节；数据从最后一条记录的结束处开始，
+  按记录顺序紧密排列。
+* 压缩条目（存储长度 < 原始长度）按 LZMA 解，ALONE / RAW 两种都试。
+* **不做 PE 还原**：把原始 exe 拼回来对抽资源没用，这部分留给第三方。
+* 表结构与已知版本不符时抛 `EvbError`，引擎退回 evbunpack —— 不猜。
+
+对照证据：`selftest/test_evb.py`（26 项）—— 手写 PE + `.enigma1`（含目录节点、
+LZMA 压缩条目）往返，畸形文件四个用例，真样本 4 个条目 / 数据起点 0x783525，
+以及引擎端到端（`--only text`，channel=self，内层也继承自研）。
+真样本的 4 个文件与 evbunpack 的产物**逐字节相同**（data.win 63,630,288 字节）。
+
+还没做完（所以版本号还是 0.16E）
+--------------------------------
+* Unity：`me/formats/unity_assets.py`（SerializedFile + UnityFS + Texture2D）
+* Unreal：pak v10/v11 的多层索引与位压缩条目（UE5），现在逐 pak 退回 repak
+* Enigma：PE 还原（把原始 exe 拼回来）—— 对抽资源没用，暂不做
+* Unity 的对照测试（其余两个解析器都已有对照：ue_pak 17 组 repak、evb 4/4 真样本）
+
+第四批：Unity 调研（未写解析器，只把地形摸清）
+--------------------------------------------
+本机唯一的 Unity 样本：`桌面\02_游戏开发\Unity解包资源\PapersPlease解包\`
+（Unity 2022.3.62f2）。现状与结论：
+
+* 文件不是标准 SerializedFile 头。实测各字段（大端）：
+  `+0x08 version=22`、`+0x14 meta_size`、`+0x18 file_size(i64)`、
+  `+0x20 data_offset(i64)`、`+0x30 "2022.3.62f2\0"`。
+  三个文件的 `data_offset - meta_size` 分别是 61/62/63，只有把元数据起点
+  取成 61 再对 16 取整才同时成立（1008 / 1248 / 3408）。
+* 元数据里**没有类型树**（`m_Width`、`Texture2D` 这类字符串一个都搜不到），
+  也就是说即使解出对象表，也需要内置类库才能把字节映射成字段 —— 这是
+  Unity 自研的真正难点，不是「解不开容器」。
+* 试过 4 种元数据起点 × 25 种类型条目长度 × 2 种对象条目宽度 × 有无 big_id
+  的组合暴力搜索，要求「解析正好吃掉 meta_size 且所有对象区间落在数据区」，
+  三份样本全部无解 → 说明这个容器的元数据段与标准布局不同（很可能是
+  某个「一键解包」工具重写过的容器，或另有包装）。
+* 对照组有了：AssetStudio（第三方通道）能读这些文件，单文件跑一次导出
+  185 个对象（MonoBehaviour / Mesh / Texture2D / AudioClip），
+  所以「自研读出来的东西对不对」有现成的比对基准。
+* 数据侧线索：`sharedassets0.assets` = `sharedassets0.assets.split0..3`
+  按 1MB 拼起来（1MB×3 + 195,680 = 3,341,408 字节，正好相等），
+  这些 1MB 块像是按 UnityFS 块大小切过又被工具拼回去的。
+
+下一步（下一轮从这里接）：
+1. 先确认这个容器到底是标准 SerializedFile 的哪种变体：拿一份**未被动过**的
+   Unity 文件（另一款 Unity 游戏，或自己构造一份 v22 标准样本）做对照；
+2. 若确属第三方工具重写的容器 → 自研通道对它明确报「未覆盖」并退回
+   AssetStudio，同时把「标准 SerializedFile（带类型树）+ UnityFS 包」这条
+   主线按合成样本实现并验证（类型树在编辑器构建/部分游戏里是有的）；
+3. 若确实是标准布局、只是我读错了字段顺序 → 按对象表 → m_Name/Texture2D
+   字段推进，最终目标仍是 Texture2D/AudioClip/TextAsset 三类。
+
+第五批：Unity 找到真样本，先落 LZ4
+--------------------------------
+两条新线索（本机实测）：
+
+* **两份未被改过的 Unity 游戏**（Steam 安装目录）：
+  `Goose Goose Duck_Data\data.unity3d`（737 MB，Unity 6000.0.71f1）、
+  `SurroundedByBoys_Data\data.unity3d`（44.8 MB，Unity 2022.3.55f1c1）。
+  两个都是标准 **UnityFS** 包（`UnityFS\0` + 版本 8 + `5.x.x` + 版本串）。
+* 新增 `me/formats/lz4_block.py`：纯标准库的 LZ4 **块**解压（UnityFS 的块与
+  块信息都用它，标准库没有 lz4）。`selftest/test_lz4_block.py` 14 项：
+  纯字面量、15/20 字节扩展长度、offset=2 匹配、offset=1 重叠复制、
+  长匹配扩展、expected_size 校验、5 种坏数据必须报错。
+
+实测（两份真包）：
+
+| 包 | 块信息压缩后 | 解压后 | 结果 |
+|---|---|---|---|
+| Goose Goose Duck | 80,203 | 222,313 | 字节数完全吻合 |
+| SurroundedByBoys | 5,317 | 14,047 | 字节数完全吻合 |
+
+解压出来的块信息里已经能看到目录项名字：`globalgamemanagers`、`level0`、
+`resources.assets`、`sharedassets0.assets`、`*.resS` —— 也就是说
+UnityFS 的「块表 + 文件目录」是同一块数据，下一轮从这里接着解析。
+
+顺带纠正上一轮的判断：UnityFS 的块信息**不在文件尾**（flags 里 0x40 位
+不能按字面理解），实测在「头对齐到 16 之后」的 64 字节处。
+
+第五批续：块表/目录仍未定标（下一代接着做）
+------------------------------------------
+已确认：
+* 块信息解压后的字节数 = 头里的 `ubinfo`（14,047 / 222,313），两份包都对得上
+  → LZ4 块解压实现可用。
+* 解压出来的内容里确实有文件名（`globalgamemanagers`、`level0`、
+  `resources.assets`、`sharedassets0.assets`、`*.resS`），文件名在信息区尾部。
+
+还没定标：
+* 块表：块记录看起来是 10 字节 `[u32 未压缩][u32 压缩][u16 flags]`（尾部
+  实测到 `131072 / 40771 / 3` 这样的干净三元组，周期正好 10），但用
+  「u32 块数在偏移 16、块表从 20 开始」去解第一块就对不上
+  （`u=512, c=0xd7200100`）。说明块表起点不是 20，块表前面还有别的字段。
+* 目录：`[i64 偏移][i64 尺寸][u32 flags][名字\0][4 字节对齐]` 这个假设在
+  两份包上都验证失败（按名字位置反推 20 字节，读出来是垃圾）。
+  名字前面那段是 `… 00 01 af 82 00 00 00 00 00 09 01 b4 40 …`，看不出
+  i64/i64/u32 的分界。
+
+下一轮做法（不猜）：
+1. 用 AssetStudio 读同一个包，拿到它认为的**文件清单和每个文件的偏移/尺寸**，
+   当作基准去对齐信息区里的字段；
+2. 两份包（44MB / 737MB，Unity 2022.3 与 6000.0）交叉验证同一条布局；
+3. 定标后先只做「解出包内文件」这一件事（SerializedFile 不动），
+   解出来的 `globalgamemanagers` 再拿去重做上一轮没搞定的元数据定标。
+
+第六批：UnityFS 索引定标成功
+--------------------------
+`me/formats/unityfs.py`：头 + 块表 + 目录全部定标，两份真包都验证过。
+
+| 包 | 块数 | 文件数 | 载荷 | 结果 |
+|---|---|---|---|---|
+| SurroundedByBoys（Unity 2022.3.55） | 1,369 | 8 | 171.1 MB | 索引全部自洽 |
+| Goose Goose Duck（Unity 6000.0.71） | 21,969 | 67 | 2,746.0 MB | 索引全部自洽 |
+
+关键修正（都是实测出来的）：
+* 块表和目录是**大端**，之前按小端读所以全是垃圾；块信息本身也是大端。
+* 块信息在**头部对齐到 16 之后**（不是文件尾）。
+* 块信息开头有 **16 个零字节**，块数从第 16 字节开始数。
+* 目录条目 = `i64 偏移 + i64 大小 + u32 flags + 名字 + NUL`，**名字后不补齐**；
+  之前按 4 字节对齐算，第二个文件的名字就少两个字符。
+
+`selftest/test_unityfs.py`（23 项）：手写不压缩包（含跨块文件）往返、
+node 越界/非 UnityFS 报错、两份真包索引断言。
+
+**还没解决**：载荷解压。两份包的块信息是标准 LZ4（解得开、字节数正好），
+但**块数据不是 LZ4** —— flags 写的是 3（LZ4HC），实测每个块都解不开
+（`匹配偏移为 0`），块 0 的内容甚至直接是 SerializedFile 头（版本 22、
+后面跟着 "2022.3.55f1c1"）。游戏目录里也没有 `oo2core_*.dll`。
+下一轮先判定载荷编码：拿块 0 的字节按「不压缩」假设去核对 node0 的
+227,204 字节（若头/字符串/尾部都自洽，说明这批包的载荷就是明文，
+块表那个「压缩长度」是别的含义）。
+
+第七批：载荷编码排查（仍未定标）
+------------------------------
+先把能确定的钉死：
+
+* 块的**文件布局是对的**：`data_offset + Σ(compressed) = 44,827,839`，
+  文件总长 44,833,231，差 11 字节（尾部对齐填充）。
+  也就是说块 0..n-1 确实按顺序紧挨着放在 `data_offset` 之后。
+* 块 0（`@5381`，73943 字节）开头是 `00×11 16 00 01 00 16 …`，
+  +36 字节处就是 `"2022.3.55f1c1"` —— 这是 node0
+  （`globalgamemanagers`）的 SerializedFile 头。
+* 按 LZ4 解：所有块都失败（首字节 token=0 时偏移字段为 0，格式上非法）。
+* 按 LZMA（外层 5 字节 props，首字节应是 0x5D）解：块首字节是
+  0x00 / 0x03 / 0x7c，都不是。
+* AssetStudio 只有 Lz4 和 Lzma 两种实现（DLL 里只有这两组符号），
+  但它能读这份包并导出 2,479 个资源 → 要么它走的不是块解压路径，
+  要么载荷真是这两者之一而我的起始偏移还差一点。
+
+下一轮：先把「AssetStudio 到底读的是不是这个包」确认清楚
+（把 data.unity3d 单独拷到一个空目录再跑，看导出数量与日志），
+再决定是继续啃 LZ4 的变体，还是把载荷当明文去对 node0 的 227,204 字节。
+
+第八批：载荷编码排查（第二轮，仍无解）
+------------------------------------
+* 已确认 AssetStudio 读的就是这个包：把 `data.unity3d` 单独拷进空目录，
+  它报 `Detected Unity version from data.unity3d: 2022.3.55f1c1`、
+  `Loading ...\data.unity3d`、导出 286 个文件（956 个资源对象）。
+  而它的 DLL 里只有 Lz4 / Lzma 两组符号 → 载荷必是这两者之一。
+* 暴力对齐也没命中：以 `data_offset=5381` 为基准，
+  起点扫 ±4096 字节 × LZ4/LZMA（LZMA 还试了 props 推导的 lc/lp/pb 与
+  4 种字典大小），判据是「解出正好 131,072 字节且开头是
+  `…00 16` + 版本串」，命中 0。
+* 又试了「前 N 字节明文 + 其后压缩」的前缀假设（N = 256…65536），LZ4 也
+  全部不成立。
+* 反向（块倒序）也扫过 4096 个起点，命中 0。
+* 反面证据：块数据在 `@5381` 直接就是 `00×11 16 00 01 00 16 …` 加
+  `"2022.3.55f1c1"`，而块布局的算术又严格吻合
+  （`Σ compressed = 44,827,839`，文件长 44,833,231，差 11 字节尾部填充）。
+  也就是说「边界对、内容看着像明文」，但「当明文用」又装不下
+  （节点总长 179,385,920 字节）。
+
+结论：这个包的载荷不是我从 5381 起能解开的 LZ4/LZMA。要么块数据前面还有
+一层我没识别出的封装（Unity 2022/6000 的新块格式），要么块表的
+`uncompressed` 列在别的空间里。下一轮换样本验证：找一款**老版本 Unity**
+（2019/2020）的游戏包，如果老包能按现在的代码解开，说明差异在 Unity 版本；
+如果老包也解不开，说明我的块起点算法从根上差一层。
+
+第八批续：整段流假设也否掉了
+--------------------------
+* 把整个数据区（44,827,839 字节）当成**一条连续的 LZ4 流**去解，
+  期望解出 179,385,920 字节 —— 首字节就失败（`匹配偏移为 0`）。
+  所以不是「块边界切错、流本身连续」这种情况。
+* 至此否掉的假设：逐块 LZ4、逐块 LZMA、整段 LZ4、明文前缀 + LZ4、
+  块倒序、块表两列互换、载荷整段明文。
+
+唯一还没试的方向：块数据前面可能有**每块 N 字节的私有头**（N 还没定），
+或者 Unity 2022/6000 换了块编码（flags=3 的含义变了）。
+下一轮按计划换**老版本 Unity** 的包做对照，用版本差异定位。
+
+第九批：补证「载荷确实是压缩的」+ 本机无对照样本
+----------------------------------------------
+* 用 AssetStudio 从这份包导出 101 个文本类资源，再拿它们的字节回包里搜：
+  最长的连续命中只有 16～32 字节（726 字节的 JSON 一段都找不到完整连续）。
+  **这直接证明载荷是压缩的**（明文的话整段都会命中）。
+* 所以「看着像明文」只是 LZ4 字面量段的错觉，块起点确实不在 5381。
+* 又试了 raw LZMA（无 props 头，lc/lp/pb 60 种组合 × 4 种字典）解块 0，
+  0 命中。
+* 本机找对照样本失败：全盘只有这两款 Unity 游戏（都是 Unity 2022+），
+  没有 2019/2020 的老包；也没有 UnityPy / AssetRipper / UABE 之类
+  带源码的参考实现（`pip list` 空，磁盘上只有 assetstudio 的二进制）。
+
+**结论（需要外部输入才能继续）**：UnityFS 的「载荷块」这一层，用现有证据
+无法定标。要往下走，需要下面任意一项：
+1. UnityFS 块格式的规格说明（或 UnityPy/AssetStudio 的源码片段）；
+2. 一份**未压缩**或**老版本 Unity** 的 .unity3d 样本（能拿来二分定位偏移）；
+3. 一份已知能正确拆开的同款包 + 它拆出来的文件（当对照）。
+在那之前，Unity 自研通道维持「待补」，不做假实现。
+
+第十批：UE5 的 pak v10/v11 开始拆结构
+----------------------------------
+用 repak 生成一份 V11 样本（2 个文件，索引 138 字节）逐字节读出来：
+
+```
++0    FString  mount "../../../"
++14   u32      NumEntries = 2
++18   u64      PathHashSeed = 0
++26   u32      bHasPathHashIndex = 1
++30   i64      PathHashIndexOffset = 0x220
++38   i64      PathHashIndexSize   = 0x20
++46   u8[20]   PathHashIndexHash
++66   u32      bHasFullDirectoryIndex = 1
++70   i64      FullDirectoryIndexOffset = 0x240
++78   i64      FullDirectoryIndexSize   = 0x37
++86   u8[20]   FullDirectoryIndexHash
++106  32 字节  编码后的条目表（位压缩，待解）
+```
+
+也就是说 v10+ 的索引是「主索引 + 路径哈希索引 + 完整目录索引」三块，
+主索引尾部还有一张位压缩条目表；文件表要跟着 `FullDirectoryIndexOffset`
+去读。下一轮按这个骨架实现，用 repak 的 `list` 当基准对齐，
+再决定位压缩条目是「必须解」还是「可按目录索引绕开」。
+
+第十批续：V11 的三段索引都读出来了（还没接进解析器）
+------------------------------------------------
+完整目录索引（FullDirectoryIndex，55 字节）:
+```
+u32 NumDirs = 2
+  u32 目录名长, 名字 "/\0", u32 文件数 = 1
+     u32 文件名长, 名字 "a.txt\0", u32 条目号 = 12
+  u32 目录名长 = 5, 名字 "Sub/\0", u32 文件数 = 1
+     u32 文件名长, 名字 "b.bin\0", u32 条目号 = 0
+```
+路径哈希索引（32 字节）: `u32 条目数 = 2` + 每条 `u64 路径哈希 + u32 条目号`
+（实测条目号 0 与 12，和目录索引里的 12 对上）。
+
+所以 v10+ 的取数据路径是:
+`主索引 → FullDirectoryIndexOffset → 目录索引(名字 + 条目号) → 条目号是
+「编码条目表」里的**字节偏移**`。主索引尾部那张 32 字节表就是编码条目表,
+条目号 0 / 12 分别落在它的第 0 与第 12 字节上。
+
+实测样本里 a.txt 的载荷在 +53（大小 100），b.bin 在 +206（大小 200）,
+数据区开头 32 字节是 a.txt 的 FPakEntry 头（`00…00 64 00 00 00 …`）。
+
+下一轮：解编码条目表（位压缩），或者找一个不需要它的路径
+（例如直接按 FPakEntry 头 + 目录顺序推算偏移）。两条路都先用 repak 的
+`list`/`unpack` 结果做基准。
+
+已交付且可复核的部分（不受此阻塞）：
+`me/formats/lz4_block.py`（LZ4 块解压，14 项自测）、
+`me/formats/unityfs.py`（头/块表/目录，23 项自测，两份真包索引全对）。
+
+命令
+----
+    python main.py <目标>                            默认第三方
+    python main.py <目标> --experimental --self      换自研
+    python main.py --channels                        两条通道的状态
+    python main.py --rebuild <data.win>              全量重建（长度会变）
+    python main.py --repair  <data.win>              先试全量重建，不行才等长补丁
+
+==============================================================================
+本轮（0.16E Beta 00087）：交互菜单改渐进式状态机 + GUI 迁 .NET 10 单文件
+==============================================================================
+
+一、CLI 交互菜单：从「一次糊满屏的 17 项」改成渐进式状态机
+----
+问题：功能加了一堆（--detect / --repair / --rebuild / --fix / --channels /
+--experimental --self / -e），菜单却是老的平铺列表，很多参数没有入口，
+而且没识别引擎就允许点「修复/重建」。
+
+改法：
+  main.py 拆成 _build_parser() / _dispatch() / _run_argv() / main()，
+  菜单（me/menu_flow.py，纯逻辑不碰 I/O）只产出 argv，执行时再用同一张
+  argparse 表解析一遍 —— 菜单与命令行只有一条执行路径。
+
+流程：
+  路径 → [0] 分析目标（--detect）/ [1] 更换路径 / [2] 退出
+  分析完 → 按引擎能力动态生成：
+    [0] 提取资源（--extract）
+    [1] 修复/重建 data.win      仅 gamemaker
+    [2] 切换拆包通道            仅有第三方且自研就绪（CTF 无此入口）
+    [3] 识别详情  [4] 更换路径  [5] 更多选项  [6] 退出
+  修复子菜单：全量重建 --rebuild / 原位补丁 --repair / 先重建再提取 --fix / 返回
+  通道子菜单：切到自研（--experimental --self）/ 切到第三方 / 返回
+  更多选项：不解容器 / 中间产物 / 指定引擎 -e / --tools / --engines /
+            --setup / --version
+
+  「指定引擎（-e）」这轮补上入口：自动识别被二次打包破坏时用户自己知道答案。
+
+自测：
+  selftest/test_cli_menu.py（119 断言）替代旧的 test_menu_entry.py
+  （旧脚本断言的 MENU_TARGETS / _menu_items / _repair_menu 已删除）。
+  覆盖：渐进式门禁、按能力生成、索引→参数不错位（0→--rebuild、
+  1→--repair、2→--fix；0→image … 4→全部）、argv 经同一 argparse 回读、
+  真子进程喂 stdin 验证渲染顺序与开关状态保持。
+
+二、GUI 壳：.NET Framework 4.7.2 → .NET 10 自包含单文件
+----
+先求证再动手：用户以为自己在用 .NET 10，实测证伪 ——
+  项目 TargetFrameworkVersion = v4.7.2
+  发布 exe 含 mscorlib、不含 System.Private.CoreLib，CLR 目录 RVA=0x2008（IL）
+  exe.config: sku=".NETFramework,Version=v4.7.2"
+  ClickOnce 清单: Microsoft.WindowsCommonLanguageRuntime 4.0.30319.0
+  本机 Framework 运行时 Release=534296 → 4.8.10008
+.NET 10 装了但没被这个壳用到（SDK 10.0.110/302/402，运行时 10.0.10/10.0.13）。
+
+迁移做的事：
+  MultiExtractorGUI.vbproj 改为 SDK 式 net10.0-windows + UseWindowsForms，
+  单文件自包含（RuntimeIdentifier win-x64、PublishSingleFile、
+  IncludeNativeLibrariesForSelfExtract、EnableCompressionInSingleFile）。
+  新增 Program.vb 提供 Main（SetHighDpiMode / EnableVisualStyles /
+  SetCompatibleTextRenderingDefault / Application.Run），退役 VB 应用框架
+  （My Project\Application.myapp、My.Settings 都没用了；旧文件留档在
+  ..\legacy-framework472\）。VB 全局导入照抄旧 vbproj（SDK 式没有
+  C# 的 ImplicitUsings）。
+  坑：MyType 不能设 WindowsForms*，否则生成的 My.MyApplication Main 自己
+  Application.Run() 而没有 MainForm，窗口没开就退（实测启动即退出）——
+  必须 MyType=Empty + StartupObject 指向 Program。
+
+产物：dist\MultiExtractorGUI.exe，49,347,262 B（47.1 MB），单文件，零运行时依赖。
+
+三、便携分发：壳自己找 CLI
+----
+Form1.RequireCli 改成按顺序找，不再只认 CLIPath.ini：
+  <壳目录>\cli\MultiExtractor.exe  →  <壳目录>\MultiExtractor.exe
+  → %LOCALAPPDATA%\MultiExtractor\CLIPath.ini 的 [CLIDirPath] Dir
+都找不到时退回 main.py + Python（标题标 [DEVELOPER MODE]）。
+退出 ClickOnce 的原因写进文档：单文件/自包含不支持 ClickOnce。
+
+新增 make_dist.py：一条命令组装 + 校验 + 压包
+  python make_dist.py [--skip-cli] [--check]
+  dist/MultiExtractor-0.16E-win64/
+      MultiExtractorGUI.exe      47.1 MB（.NET 10 单文件）
+      cli/                       198.1 MB（build_exe.py 产物，含 tools/）
+  485 个文件 / 245.1 MB → zip 137.2 MB
+  check() 断言：壳在根、cli\MultiExtractor.exe 在、resources\setup.ini\
+  version.ini 在且版本与 config.VERSION 一致、根目录只有一个 exe。
+  selftest/test_dist_layout.py（12 断言）覆盖 assemble/check 及 6 种坏形态。
+
+顺带修掉 build_exe.py 的一个真 bug：write_version_ini 用了模块级 config，
+但 config 只在 main() 里 import → 每次打包都在最后一步 NameError（退出码 1）。
+现在 config 提到模块级 import。
+
+四、实测数据
+----
+  selftest 28 个脚本全绿（含新增 test_cli_menu 119 / test_dist_layout 12）
+  CLI exe 冒烟：--engines 9 个引擎、--tools 4 个工具、--setup 定位正确
+  壳冒烟：dist 版启动后 MainWindowTitle = "True MultiExtractor"（非 DEV 模式
+  说明它认到了 cli\MultiExtractor.exe）；带 cli\main.py 时标题为
+  "True MultiExtractor[DEVELOPER MODE]"。
+
+五、还没做的
+----
+  Unity 压缩 bundle 的载荷编码仍未解（索引已对，见下文）；
+  UE5 pak v10/v11 编码条目表（结构已量，缺解码）；
+  GUI 侧还没接 describe 握手（--describe 尚未实现）。
+------------------------------------------------------------------------------
+补（0.16E Beta 00088）：默认字体钉回 Microsoft Sans Serif 8.25pt
+------------------------------------------------------------------------------
+迁移后实测客户区 933x638（设计值 800x450）—— 原因是 .NET 5+ 的
+Control.DefaultFont 从 Microsoft Sans Serif 8.25pt 换成了 Segoe UI 9pt，
+而 Form1 是 AutoScaleMode.Font + AutoScaleDimensions(6,12) 的老布局，
+默认字体一变，整个窗体按比例放大。
+
+修法：Program.Main 里 Application.SetDefaultFont(Microsoft Sans Serif 8.25pt)
+（必须在创建任何窗口之前）。实测客户区回到 800x488，宽度与设计值完全一致；
+高度多 38px 是 GDI 字体度量 13 vs 12 的纵向缩放因子（1.083），
+不影响布局：PrintWindow 抓图确认控件无重叠/裁切。
+
+抓图工具（本机一次性验证用，未入库）：按 PID + PrintWindow(PW_RENDERFULLCONTENT)
+取窗口位图，不抢前台，不影响正在全屏运行的程序。
+------------------------------------------------------------------------------
+补（0.16E Beta 00089）：没部署过的机器怎么拿到 ini
+------------------------------------------------------------------------------
+问题：CLIPath.ini 原来是「CLI 每次运行都写」的产物。新机器上如果先双击壳、
+或者壳和 CLI 分开放，这台机器根本还没有 ini，壳只能干看着日志报错
+（"CLIPath.ini 不存在"），按钮全灰，用户不知道下一步做什么。
+
+改法（Form1）：
+  1. 优先级加一条：环境变量 ME_CLI_DIR，显式指定，部署脚本/快捷方式可用。
+  2. 全都找不到时，右上角版本标签变成红字「未找到 CLI · 点此定位」，
+     点开选目录 → 校验 → 自己写 %LOCALAPPDATA%\MultiExtractor\CLIPath.ini
+     → 重新加载版本/分类/引擎，按钮恢复可用。不需要用户手写 ini。
+  3. 首次成功定位且 ini 不存在时，壳也主动写一份（存在则绝不覆盖用户改动）。
+  4. 校验分两层：
+     - PE 头粗检（MZ + PE 签名）。实测过：目录里放个同名文本文件，
+       旧逻辑直接拿去启动，Windows 弹「不支持的 16 位应用程序」对话框；
+     - 用户手选目录时再试跑一次 --version（退出码 0 且输出含 MultiExtract）。
+
+CLI 侧的既有契约不变：me/cli_path_ini.write() 仍然每次运行都写
+CLIPath.ini + version.ini，整包挪盘后壳立刻能拿到新位置；setup.ini 由
+setup_ini.ensure() 首次运行生成。所以「CLI 跑过一次」或「壳点一次定位」
+任一发生，配置就齐了。
+
+实测（Windows 11 / 96 DPI，均为真启动 + PrintWindow 抓图核对）：
+  A 只有壳、无 ini、无 cli\  → 红线提示「未找到 CLI · 点此定位」，按钮灰，
+    不写 ini（等用户选择）
+  B 无 ini + ME_CLI_DIR 指向真 CLI → 版本显示 0.16E Beta 00089，日志
+    「来源: 环境变量 ME_CLI_DIR」「首次运行，已写入 …\CLIPath.ini」
+  C 便携 cli\（junction 冒充）、无 ini → 自动写 ini，指向解析后的 CLI 目录
+  D ini 已存在 → 壳不覆盖（CLI 自己会按契约重写成本机实际位置）
+  E1 假 CLI（文本文件冒充 exe）→ Windows 弹 16 位程序对话框（旧逻辑）
+  E2 同上，PE 检查上线后 → 不启动、不弹窗、不写 ini，日志给出
+    「ME_CLI_DIR 指向的目录不能用: 不是有效的 Windows 程序（缺 MZ 头）」
+
+文档：README 的「壳定位 CLI 的顺序」改为 4 步并加了 ini 生成时机表；
+GUI-API §9 同步。
+------------------------------------------------------------------------------
+补（0.16E Beta 00090）：发布包改成「壳与 CLI 同级」，壳优先看同级目录
+------------------------------------------------------------------------------
+按用户要求调整两处：
+
+一、GUI 找回 CLI 的顺序
+  旧：cli\ 子目录优先 → 同级 → CLIPath.ini
+  新：ME_CLI_DIR（显式）→ **同级目录** → cli\ 子目录 → CLIPath.ini
+  同级的理由：解压即用，用户看到 MultiExtractor.exe 就在旁边，不需要知道
+  还有个 cli\ 子目录；cli\ 仍保留，兼容已经发出去的旧包。
+
+二、make_dist.py 默认 flat 布局
+  旧：dist/MultiExtractor-<ver>-win64/{MultiExtractorGUI.exe, cli/...}
+  新：dist/MultiExtractor-<ver>-win64/{MultiExtractorGUI.exe, MultiExtractor.exe,
+      resources\, tools\, setup.ini, version.ini, 文档}
+  --layout subdir 仍可产出旧结构。
+
+  check() 跟着改：flat 要求根目录恰好两个 exe（壳 + CLI）、resources/tools/
+  setup.ini/version.ini 都在根；subdir 要求根目录只有壳、CLI 全在 cli\。
+  故意错放的包会被拦下（测试里专门造了「flat 包但 CLI 塞进 cli\」这一例）。
+
+三、自测
+  selftest/test_dist_layout.py 从 12 条增到 18 条：新增 flat/subdir 两种布局
+  的正反例，包括「flat 包把 CLI 放进 cli\ → 必须报错」。
+
+四、文档
+  README 的分发形态图改成同级平铺；GUI-API §9 的定位顺序与目录图同步。
+  make_dist.py 顶部说明补 --layout。
+==============================================================================
+0.17 发布：CLI 改名 MultiExtractorCLI.exe + 标签从 0.16E 翻到 0.17
+==============================================================================
+
+一、CLI 可执行文件改名：MultiExtractor.exe -> MultiExtractorCLI.exe
+  理由：扁平发布包里壳和 CLI 同在根目录，两个 MultiExtractor*.exe 用户分不清
+  谁是谁。改名后：
+      MultiExtractorGUI.exe    壳
+      MultiExtractorCLI.exe    CLI
+  改动点：
+    build_exe.py   EXE="MultiExtractorCLI" / PRODUCT="MultiExtractor"（目录与
+                   zip 名仍用产品名；PyInstaller --name 用 EXE）
+    make_dist.py   CLI_EXE 常量；check() 断言根目录恰好 {GUI, CLI} 两个 exe
+    Form1.vb       CLI_EXE 常量；另认旧名 MultiExtractor.exe（日志提醒改名），
+                   免得已经拷到别人机器上的旧包打不开
+    me/tools/paths.py  提示文案跟着改
+    测试          test_dist_layout / test_frozen 用新名
+    文档          README / CLI-ARGS / GUI-API 共 36 处替换
+
+二、版本标签
+  python bump.py --release 0.17  → 0.16E Beta 00091 -> 0.17 Beta 00092
+  （只换标签，五位编号保持单调；本轮后续文档改动又 +1，见下）
+  README / ROADMAP / me/config.py / bump.py 里讲规则的那几段同步改成
+  「0.17 已验收，下一轮开 0.18 先报 0.17E」。
+
+三、发布包（flat）
+  dist/MultiExtractor-0.17-win64/
+      MultiExtractorGUI.exe   47.1 MB   .NET 10 自包含单文件
+      MultiExtractorCLI.exe    2.5 MB   PyInstaller onedir（resources/ 在旁边）
+      resources/  tools/  setup.ini  version.ini  文档
+------------------------------------------------------------------------------
+版本号方案换新（0.17R Beta 00094）：状态后缀 R / Rc / E / WIP / S
+------------------------------------------------------------------------------
+用户 2026-10-17 定：后缀紧贴版本线，不再用「上一个已发布版本 + E」那套。
+
+    R     Release           发布
+    Rc    Release candidate 候选发布
+    E     Experimental      实验性
+    WIP   Work in process   开发中
+    S     Scrapped          已废弃
+
+形态：0.17R Beta 00094 / 0.18WIP Beta 00095。开发中是 V0.17WIP，做好了是
+V0.17R —— 同一版本线只换后缀，开下一条线才改数字，五位编号始终单调累加。
+
+bump.py 重写：
+    python bump.py                       编号 +1（后缀不变）
+    python bump.py --show
+    python bump.py --tag R|Rc|E|WIP|S    换后缀（编号不变，大小写不敏感）
+    python bump.py --line 0.18 --tag WIP 换版本线
+    python bump.py --release 0.19        旧写法，等价 --line 0.19 --tag R
+不认识的后缀直接拒（退出码 1）。
+
+连带改动：
+  me/config.py 的规则注释、README 的版本规则段（改成五个后缀的表格）、
+  ROADMAP 标题与规则段、selftest/test_version_rule.py 整篇重写（23 条断言：
+  形态、目录一致性、五个后缀都有定义、bump 四种动作 + 三种非法输入）。
+  目录名规则简化：只比版本线数字（Ver 0.17 里放 0.17R / 0.17WIP 都算对）。
+==============================================================================
+V0.18E 开线（0.18E Beta 00095）
+==============================================================================
+从 Ver 0.17（0.17R，已发布）整树复制，去掉 dist/ build_exe/ work/ __pycache__。
+目录：C:\MultiExtractor\Source Code\Ver 0.18
+
+版本一步到位：
+    python bump.py --line 0.18 --tag E   -> 0.18E Beta 00094（编号不动）
+    python bump.py                       -> 0.18E Beta 00095（编号 +1）
+开发期间对外报 0.18E；验收通过后 python bump.py --tag R 变成 0.18R。
+目录名 Ver 0.18 与版本线数字对齐，test_version_rule 的目录一致性检查照样成立。
+
+本版排期（详见 ROADMAP 的 V0.18E 段）：
+  1. Unity 压缩 bundle 的载荷编码（索引已对，块编码未解）
+  2. UE5 pak v10 / v11 的编码条目表（改走 FPakEntry 头 + 目录顺序推算）
+  3. GUI ↔ CLI 契约 v2：--describe --json 握手
+  4. progress 事件补 phase / total_known；取消时杀子进程树
+
+文档同步：
+  CLI-ARGS.md / GUI-API.md 标题 0.17 -> 0.18
+  README 目录树区分「Ver 0.17 已发布」「Ver 0.18 当前开发线」，
+         打包示例改成 Multiextractor-<版本>-win64
+  ROADMAP 顶部加 V0.18E 段，0.17R 段保留
+
+==============================================================================
+V0.18E 阶段一：Slim 微内核（0.18E Beta 00096）
+==============================================================================
+用户指示：V0.18E 需要高度模块化。分两阶段做，阶段二遇底层阻塞立即回滚阶段一；
+**不越界改底层 AST / 解析核心**，重点在外围的交互、容错与分发。
+
+一、去掉 tools/，包要小
+  build_exe.py / make_dist.py 默认 Slim（要全量得显式 --full）
+  实测：dist\\MultiExtractor = 27 个文件 / 20.1 MB；zip 9.4 MB（旧全量包 137 MB 量级）
+  新断言：Slim 包里不许出现 tools/；体积超过 120 MB 直接 die
+  四个外部 CLI（utmt / assetstudio / evbunpack / repak）已移出源码树，
+  备份在 C:\\MultiExtractor\\Tools-0.18-backup，需要时用 tools/setup_tools.py 现下
+
+二、工具链变成数据：tools.ini 三级来源
+  me/tools/manifest.py（新）
+    远端 tools.ini ← 启动时后台线程 GET，3 秒超时，绝不阻塞主流程
+    本地缓存 %LOCALAPPDATA%\\MultiExtractor\\tools.ini
+    内置兜底 BUILTIN（4 个工具；断网也有清单可显示）
+    fetch() 任何失败都返回 None，不抛异常；file:// 也认（自测就这么跑，不外连）
+  环境变量：ME_TOOLS_URL / ME_TOOLS_TIMEOUT / ME_NO_NET=1
+  me/tools/paths.py（重写）：本机落点 toolsdir.ini → <根>/tools → <根>；
+    find / installed / missing / repair_hint / download_hint / status
+  CLI：--tools-dir DIR（写 toolsdir.ini）、--tools-refresh；
+    --tools 打印清单来源 + 上游地址 + 每个工具 + 全量包地址，缺工具退出码 4
+  事件流：tools_manifest / tool（GUI-API.md 已补字段表）
+  提示文案：打包版不再写「python main.py --tools-dir」，改成 exe 自己的名字
+
+三、软键菜单（首次无网、且没有缓存）
+  me/tools/softkey.py（新）：1 下载全量包 / 2 扫描本机目录 / 3 手动指定目录 /
+    4 仅用自研核心继续
+  needed() 只在「一个工具都没有 且 清单来自内置兜底」时为真；ME_NO_SOFTKEY=1 跳过
+  选 4 → interactive() 把 experimental / want_self 都置 True，本次会话强制自研
+  扫描根：程序目录及其上级、桌面、下载、文档、C:\\Tools、C:\\MultiExtractor、D:\\Games
+
+四、纯自生存验证（没有 tools/ 也要能干完活）
+  selftest/test_slim_selfcore.py（新，30 项）
+    真样本 Undertale True Genocide/data.win（8,156,234 字节）
+    --experimental --self --only image → 退出码 0，channel=self，552 张图
+    --rebuild → 8,155,722 字节 / 23 块 / 链完整 / GEN8 bytecode 16 /
+      产物仍被识别为 GameMaker
+    全程 tools/ 里仍然没有 exe
+  诚实记录能力差异：自研抽 552 张图（只图片）/ 620 个资源（全类型），
+  同一份样本 UTMT 通道是 1600+。缺工具的机器上这已是最好的结果，
+  --tools 会直接给出补工具的四条路，不假装齐全。
+
+五、自测适配（Slim 下不该红的都别红）
+  新增 test_tools_manifest.py（54 项）：解析容错、file:// 远端、坏响应不覆盖缓存、
+    内置兜底、超时夹逼、后台预热与续拉、ME_TOOLS_URL 覆盖
+  新增 test_softkey.py（69 项）：4 颗键全分支、adopt / scan / pick、needed() 判定
+  test_channel.py：默认通道按「这台机器有没有第三方工具」分支（Slim → 自研 +
+    note 写明「第三方工具缺失」）
+  test_cli_menu.py：修掉一处被合并坏掉的 import（IndentationError: import os）
+  test_samples.py：没工具时 GameMaker 按自研门槛（600）判定并打印原因
+  test_unityfs.py / test_unity_unreal.py / test_chunk_matrix.py / test_cli_contract.py：
+    缺工具时跳过或放宽；unity 段用 patch_tools() 假装工具在位（验的是「怎么调 CLI」）
+  引擎侧补一句实话：自研处理不了压缩包且本机没有 AssetStudio 时，notes 写明
+    「本机缺少 AssetStudio，无法退回第三方」——原来直接抛 EngineError，
+    runner 会把之前攒的 notes 全丢掉，用户只看到「没提取到内容」
+
+六、顺手修掉的两个真问题
+  1. me/config.py:ensure_dirs() 原来无条件建 tools/ —— Slim 包里每次启动都会
+     多出一个空目录，用户以为「这里该放工具」。现在只建 work/；真要往 tools/
+     写东西的地方（tools/setup_tools.py）自己 makedirs。
+     这个漏洞是 test_frozen 抓到的：它先按「有 tools/」断言，正好暴露了空目录。
+  2. Unity 自研吃不下压缩包、且本机没有 AssetStudio 时，原来直接抛 EngineError，
+     runner 会把先前攒的 notes 一起丢掉，用户只看到「没提取到内容」。改成写
+     note + fallback，让「本机缺少 AssetStudio，无法退回第三方」真的显示出来。
+
+验收：ME_NO_NET=1 python selftest/run_all.py → 32/32 通过（全部离线）
+壳的实测（dist\\MultiExtractor-0.18E-win64，ME_GUI_TARGET 指向真样本）：
+  版本标签读到 0.18E Beta 00096、识别 GameMaker、data.win、106 ms，
+  日志写明「GameMaker: 已解锁「提取」与「修复重建」」
+阶段二（软键式预览交互）待做，详见 ROADMAP 的 V0.18E 段。
+
+==============================================================================
+开发目录搬家（2026-10-17，用户指示）
+==============================================================================
+以后**正在开发的版本**放在：
+    C:\Users\Administrator\Desktop\MultiExtractorDeveloping
+（原来按版本号建的 C:\MultiExtractor\Source Code\Ver 0.18 不再作为工作副本，
+ 已发布版本仍归档在 Source Code\Ver X.Y 与 Compiled\Ver X.Y）
+
+配套改动：
+  selftest/test_version_rule.py 的目录一致性检查加了 DEV_DIR 例外
+    —— 归档目录仍必须叫 `Ver X.Y` 且版本线对得上；开发目录不带版本数字；
+  README「版本归档的目录约定」段同步。
+版本号此时不动（仍为 0.18E Beta 00096）；用户说了再 bump + 同步。
+
+==============================================================================
+外部工具改成「程序自己下」（用户指示：「要求他会自己下」）
+==============================================================================
+原话：不是给你个链接让你下，是他会自己下。
+
+原来软键 1 只做两件事：打印全量包地址 + 试着开浏览器 —— 等于把活推给用户。
+现在新增 me/tools/fetch.py，软键 1 / --tools-get 是**真的下载**：
+
+  清单 url 是 zip   -> 下载 → 校验 zip → 解压到 <工具根>/<子目录>/（剥顶层目录）
+  url 是单个 exe    -> 下载 → 大小校验 → 直接放进去
+  装完              -> 按清单 paths 第一条验一遍，验不过算失败
+  没有 url          -> 才走全量包：下一次 [meta] full_package 的 zip，
+                       只挑 tools/<子目录>/ 出来（不把壳和 resources 倒进来）
+
+配套细节（都是实测出来的）
+  * 镜像：直连 → ghfast.top → ghproxy.net → gh-proxy.com，ME_TOOLS_MIRROR 可覆盖；
+    file:// 这类本地地址不套镜像（自测就靠它，不然全被拼成 https 前缀）。
+  * 缓存：%LOCALAPPDATA%\MultiExtractor\download，重装直接用缓存不再下
+    （实测 repak 第二次是「用缓存的安装包」）。
+  * 半截文件：先写 .part，成功才原子替换；失败删掉，不会留下看起来已下好的空包。
+  * 没同意不下全量包：--tools-get 默认不下那 140 MB，要 --tools-get-full；
+    交互式软键里会问一句 [Y/n]。
+  * 事件流：tool_get（key/ok/how/path/size/error），GUI 可以照这个显示进度。
+
+实测（本机，2026-10-17）
+  python main.py --tools-get                  -> utmt 59.7 MB / evbunpack 6.3 MB
+                                                 / repak 1.9 MB 全部装好
+  python main.py --tools-get assetstudio --tools-get-full
+                                              -> 全量包 143,868,674 字节，
+                                                 取出 87 个文件，AssetStudio.CLI.exe 到位
+  python main.py --tools                              -> 4/4，退出码 0
+
+顺手修的三个真 bug
+  1. 全量包里按 "tools/<子目录>" 取文件时用字符串下标，差一个字符，
+     AssetStudio.CLI.exe 被解成 ssetStudio.CLI.exe —— 改成按路径段匹配。
+  2. install() 与 cmd_tools_get 各下一次全量包（143 MB 下两遍）—— 合成一次，
+     allow_package 交给调用方决定。
+  3. 下到只有 439 字节的合法小包会被「太小」判死 —— 大小门槛只留给单文件工具，
+     zip 走完整性校验。
+  （另有一条：进度回调节流，原来每 256KB 刷一行，GUI 进度条会被刷爆。）
+
+自测
+  新增 selftest/test_tools_fetch.py（46 项，全离线，file:// 冒充网络）：
+    剥顶层/多顶层/只挑 tools 子目录、坏包与空包、直链/跳过/force/手工/坏地址、
+    .part 清理、全量包只挑目标工具、缓存复用、没同意不下全量包。
+  test_softkey.py 适配：键 1 用桩验「真的调下载器」且不下全量包；
+    工具根挪到临时目录（开发机上已经有真工具了，不能干扰判定）。
+  test_slim_selfcore.py 适配：本机装了工具时不再要求 tools/ 为空。
+  全量自测：ME_NO_NET=1 python selftest/run_all.py -> 33/33 通过。
+
+注：本目录现在装了四个真工具（约 250 MB），是 --tools-get 下下来的；
+    想复现「首次无网软键」的场景，删掉 tools/ 下除 setup_tools.py 以外的东西即可。
+
+------------------------------------------------------------------------------
+进度条刷屏修复（用户截图：下载 UTMT 时一屏进度条）
+------------------------------------------------------------------------------
+现象：每帧进度都占一整行，滚了好几屏。
+原因：render_progress 把每帧固定补到 120 字符再写 \r。控制台比 120 窄时这一帧
+      会折行，\r 只回到**折行后**那一行的行首，于是每次更新都新起一行。
+修法（me/ui.py）：
+  * 每帧按终端宽度（shutil.get_terminal_size，最少按 40）截断，超长用 … 收尾；
+  * 记住上一帧的可见长度，用空格擦掉残影，而不是固定补到 120；
+  * 进度条长度随宽度自适应（>=72 列画 20 格，否则 10 格）；
+  * 字节数换成 1.5MB/59.7MB 这种短写法，别再写六位小数原值；
+  * total 未知时只显示已处理计数，不画百分比；
+  * clear_progress 按上一帧长度擦除。
+自测（selftest/test_progress.py 加了一段假控制台）：
+  宽度 60/80/100/120/200 五种情况，断言「帧内无换行」「每帧不超过终端宽度」
+  「收工恰好换行一次」「每帧都从行首覆盖」；另验 total=0 时不写百分比也不换行。
+
+==============================================================================
+在线更新（Self-Updater）落地：--update + daemon.bat（0.18E Beta 00096 追加）
+==============================================================================
+新模块 me/update.py；CLI 参数 --update [verid=xxx|beta|stable]；文档进 CLI-ARGS / GUI-API / README。
+
+一、远端数据源 version.json（仓库根目录，raw 可直接取）
+  { latest_stable, latest_beta, download_url, sha256, changelog }
+  ME_UPDATE_URL 覆盖地址；文件见仓库根的 version.json（sha256 是 v0.17R 那个 143.9 MB
+  资产的真实值 3cdc3bde…fe2c）。
+
+二、版本比较（用户指定：只比主版本号）
+  parse_version 认 "0.18E Beta 00096" / "v0.17R" / "0.18Rc"；
+  compare() 剥离 E / Rc / S / WIP 后缀，只比 X.Y —— 0.18E 与 0.18R 视为同一版，
+  不会互相催更新；同一条线要换后缀必须 --update verid=0.18R 明确点名（same_line_better）。
+  本机稳定版 + 远端有更高公测版 -> 用「有公测版可用，是否更新？」这句话问。
+
+三、CLI 流程（顺序即协议）
+  查清单（3 秒超时，失败只打一行 [warn] 检查更新超时，退出码 0）
+  → 比版本 → 确认（-y 跳过）→ 下载 UpdatePack.zip（单行原地刷新进度）
+  → SHA256 校验（不一致：报错 + 删文件 + 退出码 70）→ 写 daemon.bat
+  → 静默拉起（DETACHED_PROCESS | CREATE_NO_WINDOW）→ 主程序退出释放文件锁。
+  事件：update_check / update_ready / update_launch / update_failed /
+        update_cancelled / update_pending。
+
+四、daemon.bat（实测出来的两个坑）
+  * 等 2 秒用 ping -n 3 而不是 timeout /t 2：detached 拉起没有控制台，
+    timeout 直接报 Input redirection is not supported，等于没等；
+  * tar 的目标写 "%~dp0."（带点）：%~dp0 自带结尾反斜杠，写成 "...\\" 会把
+    引号转义掉，tar 报 could not chdir；
+  * 解压失败不删包、不启动；成功才 del 包 + start 新程序；
+  * 自删除用 (goto) 2>nul & del "%~f0"，别用嵌套引号的 start /b cmd /c。
+
+五、启动自检（每次启动，第一秒）
+  * 有 daemon.bat -> 静默删掉；
+  * 有 UpdatePack.zip -> 交互式问「是否立即安装？(Y/N)」；Y = 写 bat + 拉起 + 退出；
+    N = 保留。非交互（管道/计划任务/--json）不询问，只发 update_pending 事件。
+
+六、验收
+  selftest/test_update.py（101 项，全离线 + 本机 HTTP 假远端）：
+    版本表 / JSON 容错 / 选版本（公测版提示、verid= 点名、同线不催更）
+    / daemon.bat 关键行 / sanitize+pending / fetch 超时 / 下载 SHA256（坏包被删）
+    / CLI 端到端闭环 / SHA 不一致 / 已是最新 / 启动自检不阻塞。
+  实机闭环（tools/dev/real_update_check.py，用打包出来的 exe 自己更新自己）：
+    CLI 0.3s 退出（下载 311 B、校验通过、生成 bat）→ daemon 2 秒后覆盖
+    → marker 出现、version.ini 变成 0.99E、UpdatePack.zip 删除、daemon.bat 自删除，
+    总计 3.8s；重启后的 CLI 进交互菜单被清理（1 个）。
+  全量自测：ME_NO_NET=1 python selftest/run_all.py -> 34/34 通过。
