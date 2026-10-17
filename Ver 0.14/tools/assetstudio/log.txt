@@ -1,0 +1,41 @@
+[8/20/2026 6:22:59 PM][Info] Target Game type is Normal
+[8/20/2026 6:23:08 PM][Info] Detected Unity version from globalgamemanagers: 2022.3.62f2
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\unity default resources
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\Resources\unity_builtin_extra
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\95feb564ef846074f99f8fde685a29d1
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\level0
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\globalgamemanagers
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\e935bed70b60ab7418d78834e7de2fd1
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\globalgamemanagers.assets
+[8/20/2026 6:23:08 PM][Info] Loading C:\Users\Administrator\Desktop\Data\sharedassets0.assets
+[8/20/2026 6:23:08 PM][Info] Read assets...
+[8/20/2026 6:23:08 PM][Info] Process Assets...
+[8/20/2026 6:23:23 PM][Error] Export Shader:Hidden/FrameDebuggerRenderTargetDisplay error
+count ('-1176729623') must be a non-negative value. (Parameter 'count')
+Actual value was -1176729623.
+   at System.ArgumentOutOfRangeException.ThrowNegative[T](T value, String paramName)
+   at System.IO.BinaryReader.Read(Byte[] buffer, Int32 index, Int32 count)
+   at AssetStudio.EndianBinaryReader.ReadBytes(Int32 count) in D:\a\assetstudio\assetstudio\AssetStudio\EndianBinaryReader.cs:line 122
+   at AssetStudio.EndianBinaryReader.ReadUInt8Array(Int32 length) in D:\a\assetstudio\assetstudio\AssetStudio\EndianBinaryReader.cs:line 268
+   at AssetStudio.ShaderSubProgram..ctor(EndianBinaryReader reader, Boolean hasUpdatedGpuProgram) in D:\a\assetstudio\assetstudio\AssetStudio.Utility\ShaderConverter.cs:line 1000
+   at AssetStudio.ShaderProgram.Read(EndianBinaryReader reader, Int32 segment) in D:\a\assetstudio\assetstudio\AssetStudio.Utility\ShaderConverter.cs:line 938
+   at AssetStudio.ShaderConverter.ConvertSerializedShader(Shader shader) in D:\a\assetstudio\assetstudio\AssetStudio.Utility\ShaderConverter.cs:line 74
+   at AssetStudio.ShaderConverter.Convert(Shader shader) in D:\a\assetstudio\assetstudio\AssetStudio.Utility\ShaderConverter.cs:line 38
+   at AssetStudio.GUI.Exporter.ExportShader(AssetItem item, String exportPath) in D:\a\assetstudio\assetstudio\AssetStudio.GUI\Exporter.cs:line 70
+   at AssetStudio.GUI.Exporter.ExportConvertFile(AssetItem item, String exportPath) in D:\a\assetstudio\assetstudio\AssetStudio.GUI\Exporter.cs:line 511
+   at AssetStudio.GUI.Studio.<>c__DisplayClass19_1.<ExportAssets>b__1(AssetItem asset) in D:\a\assetstudio\assetstudio\AssetStudio.GUI\Studio.cs:line 595
+[8/20/2026 6:23:30 PM][Info] Error while read type, read 40 bytes but expected 8488 bytes
+[8/20/2026 6:23:32 PM][Info] Error while read type, read 68 bytes but expected 444 bytes
+[8/20/2026 6:23:32 PM][Info] Error while read type, read 32 bytes but expected 64 bytes
+[8/20/2026 6:23:32 PM][Info] Error while read type, read 32 bytes but expected 3980 bytes
+[8/20/2026 6:23:49 PM][Info] Detected Unity version from globalgamemanagers: 2022.3.62f2
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\95feb564ef846074f99f8fde685a29d1
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\e935bed70b60ab7418d78834e7de2fd1
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\globalgamemanagers
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\globalgamemanagers.assets
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\level0
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\sharedassets0.assets
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\unity default resources
+[8/20/2026 6:23:49 PM][Info] Loading C:\Users\Administrator\Desktop\Data\Resources\unity_builtin_extra
+[8/20/2026 6:23:49 PM][Info] Read assets...
+[8/20/2026 6:23:49 PM][Info] Process Assets...
