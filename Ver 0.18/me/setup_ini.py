@@ -141,6 +141,34 @@ def output_root() -> Path:
     return p
 
 
+def set_output(value: str) -> Path:
+    """把保存路径写回 setup.ini。行级替换，尽量不动用户的注释。
+
+    `/settings` 用得上：改完立即生效，下次启动也还是它。
+    """
+    p = setup_path()
+    lines = []
+    if p.exists():
+        try:
+            lines = _read_text(p).splitlines()
+        except OSError:
+            lines = []
+    out, done = [], False
+    for ln in lines:
+        s = ln.strip().lower().replace(" ", "")
+        if s.startswith(KEY_PATH + "="):
+            out.append(f"{KEY_PATH} = {value}")
+            done = True
+        else:
+            out.append(ln)
+    if not done:
+        if not any(x.strip().startswith("[") for x in out):
+            out.insert(0, f"[{SECTION}]")
+        out.append(f"{KEY_PATH} = {value}")
+    p.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return p
+
+
 def describe() -> str:
     """给用户看的一行摘要。"""
     raw = raw_output()

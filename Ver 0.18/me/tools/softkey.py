@@ -184,8 +184,17 @@ def render(ui) -> str:
 
 
 def ask(ui) -> str:
-    """读一次软键，返回 1..4 对应的动作名；非法输入返回 ""。"""
+    """读一次软键，返回 1..4 对应的动作名；非法输入返回 ""。
+
+    行首带斜杠的一律当**指令**（`/settings` 之类）：软键菜单是程序见到的
+    第一个界面，用户在这一步敲 `/settings` 想进设置是很自然的事。
+    """
     raw = ui.clean_input(ui.ask("软键"))
+    if raw.startswith("/"):
+        dispatch = getattr(ui, "command", None)
+        if dispatch is not None and dispatch(raw) == "quit":
+            return "quit"
+        return ""
     return {
         "1": "download",
         "2": "scan",
@@ -231,10 +240,12 @@ def handle(ui, action: str) -> str:
 
 
 def run(ui) -> str:
-    """完整的软键循环。返回 'self' 表示调用方应强制自研。"""
+    """完整的软键循环。返回 'self'（强制自研）/ 'ok' / 'quit'（用户 /quit）。"""
     while True:
         render(ui)
         action = ask(ui)
+        if action == "quit":
+            return "quit"
         if not action:
             ui.warn("按 1 / 2 / 3 / 4")
             continue

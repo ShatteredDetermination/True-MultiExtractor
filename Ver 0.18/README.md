@@ -87,6 +87,24 @@ MultiExtractorCLI.exe "D:\Games\SomeGame" --keep-work
 
 ---
 
+## 交互菜单指令（V0.18E）
+
+不带参数启动后，**路径输入行**和**任何菜单的「请选择」**都能打斜杠指令：
+
+```
+请输入游戏路径（文件或目录）: /settings
+```
+
+| 指令 | 作用 |
+|---|---|
+| `/settings` | 设置：保存位置、外部工具目录、实验性/自研/不解容器/保留中间产物 |
+| `/help` | 列出全部指令 |
+| `/tools` `/channels` `/setup` `/update` | 状态自检与在线更新 |
+| `/quit` | 退出 |
+
+`/settings` 里 1、2 两项会写进 `setup.ini` / `toolsdir.ini`（永久生效），
+3–6 项是本次会话的开关（等价于命令行参数）。
+
 ## 在线更新（V0.18E）
 
 ```bat
@@ -388,6 +406,7 @@ MultiExtractor/
 │       ├── softkey.py      首次无网的 4 颗软键菜单
 │       ├── fetch.py        自动下载外部工具（直链 / 镜像 / 全量包 / 缓存）
 │   ├── update.py           在线更新：清单比对、下载校验、daemon.bat、启动自检
+│   ├── commands.py         交互菜单的斜杠指令（/settings 等）
 │       └── proc.py         stream.py  外部 CLI 的调用与实时输出
 ├── tools/                  **Slim 包里没有这一层**；源码树里只剩维护者脚本
 │   └── setup_tools.py      维护者用：下载 / 更新外部工具（utmt / assetstudio / evbunpack / repak）
@@ -399,6 +418,7 @@ MultiExtractor/
     ├── test_slim_selfcore.py  没有 tools/ 时自研核心独立跑通提取 + 全量重建
     ├── test_tools_fetch.py  外部工具自动下载（file:// 冒充网络）
     ├── test_update.py       在线更新：本地 HTTP 假远端 + daemon 闭环
+    ├── test_commands.py     斜杠指令：解析、/settings 每项、真跑菜单
     ├── test_setup_ini.py   配置读取（含 BOM / GBK / UTF-16）
     ├── test_frozen.py      打包版 exe 自测（未打包时跳过）
     └── test_*.py           各模块的合成样本测试

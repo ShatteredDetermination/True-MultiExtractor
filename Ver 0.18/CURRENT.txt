@@ -802,3 +802,36 @@ V0.18E 阶段一：Slim 微内核（0.18E Beta 00096）
     → marker 出现、version.ini 变成 0.99E、UpdatePack.zip 删除、daemon.bat 自删除，
     总计 3.8s；重启后的 CLI 进交互菜单被清理（1 个）。
   全量自测：ME_NO_NET=1 python selftest/run_all.py -> 34/34 通过。
+
+==============================================================================
+交互菜单指令：/settings 进设置（用户实机反馈：敲 /settings 被当成路径）
+==============================================================================
+现象（用户原话）：
+    请输入游戏路径（文件或目录）: /settings
+    [err] 路径不存在: \settings
+
+新模块 me/commands.py：行首带斜杠的一律当指令，**三处都认**
+  1. 路径输入行（_ask_target）
+  2. 任何菜单的「请选择」（ui.menu 里装了 command 钩子）
+  3. 首次无网软键菜单（softkey.ask；打包版没 tools/ 时第一眼就是它）
+
+指令表（中文别名也认）：
+  /help /h /? /帮助          列出全部
+  /settings /s /配置 /设置   设置面板
+  /tools /channels /setup    状态自检（转调 main.cmd_*，不另写一套）
+  /update                    检查更新
+  /quit /q /exit /退出       退出
+
+/settings 六项：
+  [1] 保存位置     → 写 setup.ini（新增 setup_ini.set_output()，行级替换保留注释）
+  [2] 外部工具目录 → 写 toolsdir.ini（清空=回到默认）
+  [3] 实验性功能   [4] 自研打包核心   [5] 不解容器   [6] 保留中间产物
+      —— 本次会话开关，等价 --experimental / --self / --no-deep / --keep-work
+      —— 同时写 args 与 session，回到菜单立刻按新开关走（实测通道从「第三方」变「自研」）
+  [7] 清空工具目录   [0] 返回
+
+自测 selftest/test_commands.py（47 项）：解析（别名/大小写/带参数/光斜杠不算）、
+分发（未知指令只提示、/quit）、/settings 每一项（含写盘与读回、开关同步到 session）、
+真跑三段（路径行敲 /settings、菜单里敲 /help + /channels、/quit 退出码 0）。
+test_softkey.py 补 3 项：软键菜单里 /settings 之后还能按 4、/quit 直接退出。
+全量：ME_NO_NET=1 python selftest/run_all.py -> 35/35 通过。

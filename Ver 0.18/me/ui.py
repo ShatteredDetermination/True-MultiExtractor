@@ -96,6 +96,23 @@ def ask(prompt: str, default: Optional[str] = None) -> str:
     return clean_input(raw) or (default or "")
 
 
+# 斜杠指令的钩子：menu() 里遇到 `/xxx` 就交给它，不当作非法输入。
+# 由 main.interactive 装一次；没装时 `/xxx` 仍然按非法输入处理。
+_COMMAND_HOOK = None
+
+
+def set_command_hook(fn) -> None:
+    global _COMMAND_HOOK
+    _COMMAND_HOOK = fn
+
+
+def command(text: str):
+    """把一行输入交给指令钩子。返回 None=继续，'quit'=退出。"""
+    if _COMMAND_HOOK is None:
+        return None
+    return _COMMAND_HOOK(text)
+
+
 def menu(title: str, options: list) -> int:
     """显示菜单并返回用户选择的索引。
 
@@ -109,6 +126,11 @@ def menu(title: str, options: list) -> int:
             label = item[0] if isinstance(item, (tuple, list)) else item
             print(f"  [{i}] {label}")
         raw = ask("请选择")
+        # 斜杠指令：任何菜单里都能用，跑完重新画一遍菜单
+        if raw.startswith("/"):
+            if command(raw) == "quit":
+                raise SystemExit(0)
+            continue
         if raw.isdigit() and 0 <= int(raw) < len(options):
             return int(raw)
         error("无效输入")

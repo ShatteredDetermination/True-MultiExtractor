@@ -1,0 +1,265 @@
+# -*- coding: utf-8 -*-
+"""斜杠指令（`/settings` 等）。
+
+用户的用法很直接：在「请输入游戏路径」那里敲 `/settings` 就进设置。
+所以指令必须**在两处都认**：
+
+    * 路径输入那一行（还没进主菜单，甚至还没选目标）；
+    * 任何菜单的「请选择」那一行（分析前 / 分析后 / 子菜单）。
+
+设计取舍
+--------
+* 指令只做「交互层」的事：改设置、看状态、退出。真正的功能一律回到
+  `main.py` 的 `cmd_*` 上，不另写一套逻辑 —— 否则菜单和命令行迟早分叉。
+* 每个指令返回 `None`（继续）或 `"quit"`（退出菜单）。
+* 设置项里能持久化的只有两样：`setup.ini` 的保存路径、`toolsdir.ini` 的
+  工具目录；其余是**本次会话**的开关（与命令行参数对应）。
+"""
+
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
+
+from me import config, setup_ini, ui
+from me.tools import paths as tool_paths
+
+HELP_LINE = "指令（行首带斜杠）："
+
+# 指令表：名字 -> (一行说明, 处理函数的属性名)
+COMMANDS: Dict[str, Tuple[str, str]] = {
+    "help": ("列出所有指令", "cmd_help"),
+    "settings": ("设置：保存位置 / 工具目录 / 会话开关", "cmd_settings"),
+    "tools": ("看外部工具状态（缺了就提示怎么补）", "cmd_tools"),
+    "channels": ("看每个引擎的拆包通道", "cmd_channels"),
+    "setup": ("看 setup.ini 的位置与当前值", "cmd_setup"),
+    "update": ("检查在线更新", "cmd_update"),
+    "quit": ("退出交互菜单", "cmd_quit"),
+}
+
+ALIASES = {
+    "s": "settings", "set": "settings", "配置": "settings", "设置": "settings",
+    "?": "help", "h": "help", "帮助": "help",
+    "exit": "quit", "q": "quit", "退出": "quit",
+}
+
+
+class Context:
+    """指令需要的东西：会话（可能还没建）、参数、以及一次性的重绘标记。"""
+
+    def __init__(self, args=None, session=None):
+        self.args = args
+        self.session = session
+        self.dirty = False          # 改过开关，调用方据此重绘菜单
+
+    def set_session(self, session) -> None:
+        self.session = session
+
+
+def parse(text: str) -> Optional[Tuple[str, List[str]]]:
+    """`/settings x y` -> ("settings", ["x","y"])；不是指令返回 None。"""
+    if not text:
+        return None
+    raw = text.strip()
+    if not raw.startswith("/"):
+        return None
+    body = raw[1:].strip()
+    if not body:
+        return None
+    parts = body.split()
+    name = parts[0].lower()
+    name = ALIASES.get(name, name)
+    return name, parts[1:]
+
+
+def is_command(text: str) -> bool:
+    return parse(text) is not None
+
+
+def handle(text: str, ctx: Optional[Context] = None) -> Optional[str]:
+    """跑一条指令。返回 None（继续）或 "quit"。
+
+    认不出的指令只提示，不报错 —— 用户手滑打错一个字母不该被当成路径。
+    """
+    parsed = parse(text)
+    if parsed is None:
+        return None
+    name, argv = parsed
+    ctx = ctx or Context()
+
+    entry = COMMANDS.get(name)
+    if entry is None:
+        ui.warn(f"没有这个指令: /{name}")
+        _show_commands()
+        return None
+
+    fn = globals().get(entry[1])
+    if fn is None:                      # 理论上不会发生
+        ui.warn(f"指令 /{name} 还没接上")
+        return None
+    try:
+        return fn(ctx, argv)
+    except (EOFError, KeyboardInterrupt):
+        # 用户按 Ctrl+C / 输入流结束：当成「退出指令」，别把菜单炸掉
+        return "quit"
+
+
+# ---------------------------------------------------------------- 各指令
+def _show_commands() -> None:
+    ui.info(HELP_LINE)
+    for name, (desc, _fn) in COMMANDS.items():
+        ui.detail(f"/{name:<10} {desc}")
+    ui.detail("也可以直接打 / 帮助、/设置（中文别名同样认）")
+
+
+def cmd_help(_ctx: Context, _argv: List[str]) -> None:
+    _show_commands()
+    return None
+
+
+def cmd_quit(_ctx: Context, _argv: List[str]) -> str:
+    ui.info("再见")
+    return "quit"
+
+
+def cmd_tools(_ctx: Context, _argv: List[str]) -> None:
+    import main
+    main.cmd_tools()
+    return None
+
+
+def cmd_channels(_ctx: Context, _argv: List[str]) -> None:
+    import main
+    main.cmd_channels()
+    return None
+
+
+def cmd_setup(_ctx: Context, _argv: List[str]) -> None:
+    import main
+    main.cmd_setup()
+    return None
+
+
+def cmd_update(ctx: Context, _argv: List[str]) -> None:
+    import main
+    main.cmd_update("", ctx.args)
+    return None
+
+
+# ---------------------------------------------------------------- 设置
+def _onoff(v: bool) -> str:
+    return "[开]" if v else "[关]"
+
+
+def _session_flag(ctx: Context, name: str) -> Tuple[bool, str]:
+    """读一个会话开关：优先会话，其次命令行参数。返回 (值, 来源)。"""
+    if ctx.session is not None and hasattr(ctx.session, name):
+        return bool(getattr(ctx.session, name)), "会话"
+    if ctx.args is not None and hasattr(ctx.args, name):
+        return bool(getattr(ctx.args, name)), "参数"
+    return False, "默认"
+
+
+def _set_session_flag(ctx: Context, name: str, value: bool) -> None:
+    """同时改会话与参数 —— 参数是会话的种子，两边不能打架。"""
+    if ctx.args is not None and hasattr(ctx.args, name):
+        setattr(ctx.args, name, value)
+    if ctx.session is not None and hasattr(ctx.session, name):
+        setattr(ctx.session, name, value)
+    ctx.dirty = True
+
+
+def _settings_rows(ctx: Context) -> List[str]:
+    exp, _ = _session_flag(ctx, "experimental")
+    sel, _ = _session_flag(ctx, "want_self")
+    nodeep, _ = _session_flag(ctx, "no_deep")
+    keep, _ = _session_flag(ctx, "keep_work")
+    od = tool_paths.override_dir()
+    tools = str(od) if od is not None else f"{Path(config.ROOT) / 'tools'}（默认）"
+    return [
+        f"保存位置      {setup_ini.describe()}",
+        f"外部工具目录  {tools}",
+        f"实验性功能    {_onoff(exp)}",
+        f"自研打包核心  {_onoff(sel)}",
+        f"不解容器      {_onoff(nodeep)}",
+        f"保留中间产物  {_onoff(keep)}",
+    ]
+
+
+def render_settings(ctx: Context) -> None:
+    rows = _settings_rows(ctx)
+    ui.sep()
+    ui.info("[设置]（改完立即生效；1、2 会写进配置文件）")
+    for i, row in enumerate(rows, 1):
+        ui.detail(f"  [{i}] {row}")
+    ui.detail("  [7] 清空工具目录（回到默认）")
+    ui.detail("  [0] 返回")
+
+
+def cmd_settings(ctx: Context, _argv: List[str]) -> None:
+    """设置菜单。0 返回，其余按提示改。"""
+    while True:
+        render_settings(ctx)
+        raw = ui.clean_input(ui.ask("设置项"))
+        if raw in ("", "0"):
+            return None
+        if raw == "1":
+            _set_output_path()
+        elif raw == "2":
+            _set_tools_dir()
+        elif raw == "3":
+            _toggle(ctx, "experimental",
+                    "实验性功能是换自研通道的总闸；关掉它单独开自研也不会生效")
+        elif raw == "4":
+            _toggle(ctx, "want_self", "自研核心需要实验性功能同时打开")
+        elif raw == "5":
+            _toggle(ctx, "no_deep", "开了就只收集散落文件，不进容器")
+        elif raw == "6":
+            _toggle(ctx, "keep_work", "开了会保留 work/ 中间产物（占地方）")
+        elif raw == "7":
+            tool_paths.clear_override_dir()
+            ui.ok("已清空工具目录，回到默认位置")
+        else:
+            ui.warn("按 0-7 选")
+
+
+def _toggle(ctx: Context, name: str, hint: str = "") -> None:
+    cur, _src = _session_flag(ctx, name)
+    _set_session_flag(ctx, name, not cur)
+    ui.ok(f"{name} -> {_onoff(not cur)}")
+    if hint:
+        ui.detail(hint)
+
+
+def _set_output_path() -> None:
+    cur = setup_ini.raw_output()
+    ui.info(f"当前保存路径: {cur}")
+    ui.detail("相对路径按程序目录算；也可以写 D:\\\\某处 这样的绝对路径")
+    raw = ui.clean_input(ui.ask("新的保存路径（回车=不改）"))
+    if not raw:
+        return
+    try:
+        p = setup_ini.set_output(raw)
+    except OSError as exc:
+        ui.error(f"写 setup.ini 失败: {exc}")
+        return
+    ui.ok(f"已写入 {p.name}：{raw}")
+    ui.detail(f"实际位置: {setup_ini.output_root()}")
+
+
+def _set_tools_dir() -> None:
+    od = tool_paths.override_dir()
+    ui.info(f"当前工具目录: {od if od is not None else '（默认）'}")
+    ui.detail("填含 utmt/ assetstudio/ 的那一层；回车不改")
+    raw = ui.clean_input(ui.ask("工具根目录"))
+    if not raw:
+        return
+    d = Path(raw)
+    if not d.is_dir():
+        ui.error(f"目录不存在: {d}")
+        return
+    tool_paths.set_override_dir(d)
+    if tool_paths.any_installed():
+        ui.ok(f"已记住: {d}")
+        ui.detail("找到: " + ", ".join(tool_paths.installed()))
+    else:
+        ui.warn(f"这个目录下没找到工具: {d}")
+        ui.detail("期望里面有 utmt/UndertaleModCli.exe 之类；写进去了，装上工具后自动生效")

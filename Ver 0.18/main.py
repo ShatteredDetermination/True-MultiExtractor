@@ -30,7 +30,8 @@ from pathlib import Path
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from me import cli_path_ini, config, console, events, menu_flow, setup_ini, ui   # noqa: E402
+from me import (cli_path_ini, commands, config, console, events,  # noqa: E402
+                menu_flow, setup_ini, ui)
 from me.engines import LOAD_ERRORS, names as engine_names  # noqa: E402
 from me.runner import run                     # noqa: E402
 from me.scanner import detect_engine          # noqa: E402
@@ -791,12 +792,17 @@ def cmd_extract(target: Path, args, categories) -> int:
 # 菜单只做两件事：问用户、把选择翻译成命令行参数。真正的执行走 _run_argv，
 # 所以菜单和命令行永远是同一条路（见 me/menu_flow.py）。
 def interactive(args) -> int:
+    ctx = commands.Context(args=args)
+    ui.set_command_hook(lambda raw: commands.handle(raw, ctx))
     _warn_missing_tools()
 
     # 首次无网无缓存：先过一遍软键菜单，避免用户对着「第三方通道不可用」
     # 不知道下一步。选了 [4] 就本次会话强制自研。
     if softkey.needed():
-        if softkey.run(ui) == "self":
+        choice = softkey.run(ui)
+        if choice == "quit":
+            return config.EXIT_OK
+        if choice == "self":
             args.experimental = True
             args.want_self = True
 
@@ -809,6 +815,7 @@ def interactive(args) -> int:
         experimental=args.experimental, want_self=args.want_self,
         no_deep=args.no_deep, keep_work=args.keep_work, out=args.out or "",
     )
+    ctx.set_session(sess)
     det = None
 
     while True:
@@ -980,17 +987,27 @@ def _menu_more(sess, args) -> None:
 
 
 def _ask_target():
-    """问用户要路径，返回 Path 或 None。"""
-    # ui.ask 已经去过引号/空白/BOM，这里再兜一次底（用户可能从别处粘进来）
-    raw = ui.clean_input(ui.ask("请输入游戏路径（文件或目录）"))
-    if not raw:
-        ui.error("未输入路径")
-        return None
-    target = Path(raw)
-    if not target.exists():
-        ui.error(f"路径不存在: {target}")
-        return None
-    return target
+    """问用户要路径，返回 Path 或 None。
+
+    这一行也认斜杠指令：用户第一下手边没有路径，敲 `/settings` 就该进设置，
+    而不是被当成一个名叫 `/settings` 的路径去 stat 一遍再报「不存在」。
+    """
+    while True:
+        # ui.ask 已经去过引号/空白/BOM，这里再兜一次底（用户可能从别处粘进来）
+        raw = ui.clean_input(ui.ask("请输入游戏路径（文件或目录）"))
+        if raw.startswith("/"):
+            if ui.command(raw) == "quit":
+                raise SystemExit(config.EXIT_OK)
+            ui.detail("（输入路径继续，或 /help 看指令）")
+            continue
+        if not raw:
+            ui.error("未输入路径")
+            return None
+        target = Path(raw)
+        if not target.exists():
+            ui.error(f"路径不存在: {target}")
+            return None
+        return target
 
 
 def _show_detail(det) -> None:

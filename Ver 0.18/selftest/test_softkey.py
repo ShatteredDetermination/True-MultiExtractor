@@ -65,6 +65,11 @@ class FakeUi:
     def progress(self, done, total, label="", *_a, **_k):
         self.lines.append(f"PROGRESS {done}/{total} {label}")
 
+    def command(self, raw):
+        """斜杠指令：转发给真正的 me.ui（它会调用 main 里装的钩子）。"""
+        from me import ui as _ui
+        return _ui.command(raw)
+
     # -- 输入 --
     def ask(self, *_a, **_k):
         return self.answers.pop(0) if self.answers else ""
@@ -268,6 +273,27 @@ def main() -> int:
         print("\n[9] 未知动作")
         check(softkey.handle(FakeUi(), "") == "", "空动作 -> 空")
         check(softkey.handle(FakeUi(), "bogus") == "", "乱写的动作 -> 空")
+
+        # ---------------------------------------------------------- 斜杠指令
+        print("\n[9b] 软键菜单里也认斜杠指令")
+        from me import ui as _ui
+
+        seen_cmds = []
+        real_cmd = _ui.command
+        _ui.command = lambda raw: (seen_cmds.append(raw), None)[1]
+        try:
+            paths.clear_override_dir()
+            mf.reset_for_tests()
+            ui_c = FakeUi(["/settings", "4"])
+            check(softkey.run(ui_c) == "self", "/settings 之后还能按 4")
+            check(seen_cmds == ["/settings"], "指令被交给指令层", str(seen_cmds))
+
+            seen_cmds.clear()
+            _ui.command = lambda raw: "quit"
+            ui_q = FakeUi(["/quit"])
+            check(softkey.run(ui_q) == "quit", "/quit 让软键循环退出")
+        finally:
+            _ui.command = real_cmd
 
         # ---------------------------------------------------------- 完整循环
         print("\n[10] run()：完整循环")
