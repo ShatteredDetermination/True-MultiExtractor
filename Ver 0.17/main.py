@@ -1,0 +1,796 @@
+# -*- coding: utf-8 -*-
+"""True MultiExtractTool 入口。
+
+用法：
+    python main.py                          # 交互式菜单
+    python main.py <文件或目录>              # 直接提取（全部类型）
+    python main.py <路径> --only image,audio # 只要图片和音频
+    python main.py <路径> -o D:\\out         # 指定输出目录
+    python main.py --tools                  # 检查外部工具是否齐全
+    python main.py --engines                # 列出已加载的引擎模块
+    python main.py --setup                  # 查看/定位 setup.ini 配置文件
+    python main.py --version                # 只打印版本
+    python main.py <路径> --json             # NDJSON 事件流（GUI 调用）
+    python main.py <路径> --experimental --self  # 换自研拆包通道（默认第三方）
+    python main.py --channels               # 每个引擎的两条通道状态
+
+不带任何参数 = 原来的交互菜单，双击 exe 就是这个。
+--json 的完整约定见 GUI-API.md。
+"""
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+# 允许从任意工作目录运行：把项目根加进 sys.path。
+# 打包成 exe 后代码已经在归档里、import 机制自己认得，这一步不但没用，
+# 还会把 _MEIPASS 插到最前面，所以跳过。
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from me import cli_path_ini, config, console, events, menu_flow, setup_ini, ui   # noqa: E402
+from me.engines import LOAD_ERRORS, names as engine_names  # noqa: E402
+from me.runner import run                     # noqa: E402
+from me.scanner import detect_engine          # noqa: E402
+from me.tools import paths as tool_paths      # noqa: E402
+
+class _ArgError(Exception):
+    """参数错误。不用 argparse 默认的 sys.exit，好让 GUI 拿到结构化报错。"""
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        raise _ArgError(message)
+
+
+def _build_parser() -> "_Parser":
+    """命令行参数表。菜单拼出来的参数也用同一张表解析，保证两边不走岔。"""
+    ap = _Parser(
+        prog="MultiExtractor",
+        description="多引擎游戏资源提取工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("target", nargs="?", help="游戏文件或目录")
+    ap.add_argument("-o", "--out", help="输出目录")
+    ap.add_argument("-e", "--engine", help="强制指定引擎")
+    ap.add_argument("--only", help="只提取这些分类，逗号分隔：image,audio,text,font,video")
+    ap.add_argument("--no-deep", action="store_true",
+                    help="不解容器，仅收集散落文件")
+    ap.add_argument("--keep-work", action="store_true",
+                    help="保留 work/ 中间产物")
+    ap.add_argument("--fix", action="store_true",
+                    help="先重建容器结构（治愈无法解析的 data.win）再提取")
+    ap.add_argument("--repair", action="store_true",
+                    help="只重建容器结构，写出 <名字>_rebuilt.win，不提取")
+    ap.add_argument("--rebuild", action="store_true",
+                    help="全量重建：按语义模型重新排布整份文件（不等长）")
+    ap.add_argument("--detect", action="store_true", help="只识别引擎，不提取")
+    ap.add_argument("--tools", action="store_true", help="检查外部 CLI 是否齐全")
+    ap.add_argument("--engines", action="store_true", help="列出已加载的引擎模块")
+    # ---- V0.17 两条通道：实验性功能 + 自研开关，两个都开才换自研
+    ap.add_argument("--experimental", action="store_true",
+                    help="启用实验性功能（换自研拆包通道的前置开关）")
+    ap.add_argument("--self", dest="want_self", action="store_true",
+                    help="使用自研拆包核心；必须同时给 --experimental，否则仍走第三方")
+    ap.add_argument("--no-self", dest="want_self", action="store_false",
+                    help="显式走第三方（默认）")
+    ap.add_argument("--channels", action="store_true",
+                    help="列出每个引擎的自研 / 第三方通道状态")
+    ap.add_argument("--setup", action="store_true",
+                    help="查看 setup.ini")
+    ap.add_argument("-y", "--yes", action="store_true", help="不询问，直接执行")
+    ap.add_argument("--json", action="store_true",
+                    help="NDJSON 事件流写 stdout；人读文本转 stderr")
+    ap.add_argument("--cancel-file", metavar="PATH",
+                    help="该文件一出现就取消本次运行（GUI 用）")
+    ap.add_argument("--categories", action="store_true",
+                    help="列出可用分类")
+    ap.add_argument("--version", action="store_true", help="只打印版本")
+    return ap
+
+
+def _dispatch(args) -> int:
+    """按解析好的参数执行。main() 和交互菜单都走这里。"""
+    if args.version:
+        return cmd_version()
+    if args.categories:
+        return cmd_categories()
+    if args.tools:
+        return cmd_tools()
+    if args.engines:
+        return cmd_engines()
+    if args.channels:
+        return cmd_channels()
+    if args.setup:
+        return cmd_setup()
+    if args.detect:
+        return cmd_detect(args.target)
+    if args.rebuild:
+        return cmd_rebuild(Path(args.target) if args.target else None, args)
+    if args.repair:
+        return cmd_repair(Path(args.target) if args.target else None, args)
+
+    # GUI 调用必须带目标：不带就掉进交互菜单等人输入，壳会一直挂着
+    if args.json and not args.target:
+        ui.error("--json 需要指定目标路径")
+        return config.EXIT_ARGS
+
+    categories = _parse_only(args.only)
+    if categories is _BAD_ONLY:
+        return config.EXIT_ARGS
+
+    if args.target:
+        return cmd_extract(Path(args.target), args, categories)
+
+    return interactive(args)
+
+
+def _run_argv(argv) -> int:
+    """把菜单拼出来的参数当命令行再跑一遍 —— 菜单与命令行只有这一条执行路径。"""
+    ns = _build_parser().parse_args([str(x) for x in argv])
+    if ns.json and not events.enabled():
+        events.enable(ns.cancel_file)
+    return _dispatch(ns)
+
+
+def main(argv=None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    if args.json and not events.enabled():
+        events.enable(args.cancel_file)
+    if args.json:
+        events.begin(app=config.APP_NAME, version=config.VERSION,
+                     pid=os.getpid(), target=args.target,
+                     engine=args.engine, only=args.only, out=args.out,
+                     cancel_file=args.cancel_file)
+
+    ui.banner()
+
+    # setup.ini 坏掉时提醒一句。以前这里会静默退回默认值，
+    # 用户改了保存路径却没生效、还不知道为什么。
+    _setup_err = setup_ini.load()["error"]
+    if _setup_err and not args.setup:
+        ui.warn(_setup_err)
+        ui.detail("详情见 --setup")
+
+    return _dispatch(args)
+
+
+# ------------------------------------------------------------------ 子命令
+def cmd_version() -> int:
+    ui.ok(f"{config.APP_NAME} {config.VERSION}")
+    events.emit("version", app=config.APP_NAME,
+                version=config.VERSION, schema=events.SCHEMA)
+    return config.EXIT_OK
+
+
+def _pick_data_file(target):
+    """把用户给的目标（文件或目录）落到 data.win 上；找不到就返回 (None, 退出码)。"""
+    if target is None:
+        return None, config.EXIT_ARGS
+    if not target.exists():
+        ui.error(f"路径不存在: {target}")
+        return None, config.EXIT_TARGET
+    if target.is_dir():
+        from me.engines.gamemaker import find_data_file
+        found = find_data_file(target)
+        if found is None:
+            ui.error("目录里没找到 data.win / game.droid")
+            return None, config.EXIT_TARGET
+        return found, config.EXIT_OK
+    return target, config.EXIT_OK
+
+
+def cmd_rebuild(target, args) -> int:
+    """全量重建（V0.15E）：读成语义模型 → 重新排布 → 写出一份全新的文件。
+
+    与 ``--repair`` 的区别：不保留原文件长度，也不在原字节上缝补。
+    指针全部按新布局重算，块里没人引用的字节直接丢掉。
+    """
+    from me.formats import gamemaker_full as full
+
+    data_file, code = _pick_data_file(target)
+    if data_file is None:
+        if code == config.EXIT_ARGS:
+            ui.error("--rebuild 需要指定 data.win 或游戏目录")
+        return code
+
+    ui.step(f"全量重建: {data_file}")
+    out_dir = Path(args.out) if args.out else data_file.parent
+    dest = out_dir / (data_file.stem + "_rebuilt" + data_file.suffix)
+
+    t0 = time.perf_counter()
+    try:
+        rep = full.rebuild_file(data_file, dest)
+    except Exception as exc:                       # noqa: BLE001
+        ui.error(f"重建失败: {type(exc).__name__}: {exc}")
+        events.emit("note", level="err", text=f"重建失败: {exc}")
+        events.emit("end", exit=config.EXIT_INTERNAL)
+        return config.EXIT_INTERNAL
+    elapsed = time.perf_counter() - t0
+
+    for line in _rebuild_lines(rep):
+        ui.ok(line)
+    for n in rep.notes:
+        ui.detail(n)
+    events.emit("result", ok=True, written=1,
+                out_dir=str(Path(rep.dst).parent),
+                engine="gamemaker", engine_name="GameMaker",
+                detail=f"{data_file.name} -> {Path(rep.dst).name}",
+                categories={}, notes=_rebuild_lines(rep),
+                fallback=False, error=None, elapsed=round(elapsed, 1))
+    events.emit("end", exit=config.EXIT_OK)
+    return config.EXIT_OK
+
+
+def _rebuild_lines(rep) -> list:
+    """重建结果的读出行（人读文本与 NDJSON 用同一份）。"""
+    return [
+        f"建模 {len(rep.modeled)} 块，搬运 {len(rep.raw)} 块",
+        f"写出 {Path(rep.dst).name}  {rep.new_bytes:,} 字节"
+        f"（原 {rep.old_bytes:,}，{rep.new_bytes - rep.old_bytes:+,}）",
+        "指针已按新布局重算，读回核对条目数一致",
+    ]
+
+
+def cmd_repair(target, args) -> int:
+    """只重建容器结构（V0.15）：把 data.win 修成原版 UTMT 也能解析的形态。
+
+    V0.15E 起**先走全量重建**：能整份重排就整份重排（长度会变）；
+    只有遇到还没建模的布局（比如更老的 GMS2 特殊精灵）才退回
+    原位补丁，并在输出里说明原因。
+    """
+    from me.formats import gamemaker_full as full
+    from me.formats import gamemaker_rebuild as rb
+
+    data_file, code = _pick_data_file(target)
+    if data_file is None:
+        if code == config.EXIT_ARGS:
+            ui.error("--repair 需要指定 data.win 或游戏目录")
+        return code
+
+    out_dir = Path(args.out) if args.out else data_file.parent
+    dest = out_dir / (data_file.stem + "_rebuilt" + data_file.suffix)
+
+    ui.step(f"重建结构: {data_file}")
+    t0 = time.perf_counter()
+    try:
+        rep = full.rebuild_file(data_file, dest)
+    except Exception as exc:                       # noqa: BLE001
+        ui.warn(f"全量重建不可用（{type(exc).__name__}: {exc}），退回原位补丁")
+        events.emit("note", level="warn",
+                    text=f"全量重建不可用，退回原位补丁: {exc}")
+        return _repair_in_place(data_file, dest, rb, t0)
+
+    elapsed = time.perf_counter() - t0
+    ui.ok("全量重建")
+    for line in _rebuild_lines(rep):
+        ui.ok(line)
+    for n in rep.notes:
+        ui.detail(n)
+    # 必须发 result：GUI 是靠这条事件里的 written 判断「有没有产出」的，
+    # 只发 note 的话壳会报「退出码 0，但未产出文件」。
+    events.emit("result", ok=True, written=1,
+                out_dir=str(Path(rep.dst).parent),
+                engine="gamemaker", engine_name="GameMaker",
+                detail=f"{data_file.name} -> {Path(rep.dst).name}",
+                categories={}, notes=["全量重建"] + _rebuild_lines(rep),
+                fallback=False, error=None, elapsed=round(elapsed, 1))
+    events.emit("end", exit=config.EXIT_OK)
+    return config.EXIT_OK
+
+
+def _repair_in_place(data_file, dest, rb, t0) -> int:
+    """旧路径：在原字节上缝补，保证文件长度不变。"""
+    try:
+        rep = rb.rebuild_file(data_file, dest)
+    except Exception as exc:                       # noqa: BLE001
+        ui.error(f"重建失败: {type(exc).__name__}: {exc}")
+        events.emit("note", level="err", text=f"重建失败: {exc}")
+        events.emit("end", exit=config.EXIT_INTERNAL)
+        return config.EXIT_INTERNAL
+    elapsed = time.perf_counter() - t0
+
+    for line in rep.rebuilt:
+        ui.ok(line)
+    for n in rep.notes:
+        ui.detail(n)
+
+    left = [f for f in rep.findings
+            if f.level == "err" and f.code.startswith("after:")]
+    if left:
+        ui.warn(f"诊断: err {len(left)} 项")
+        for f in left[:6]:
+            ui.detail(f"{f.chunk}: {f.message}")
+    if rep.new_bytes != rep.old_bytes:
+        ui.error("文件长度变化, 结果丢弃")
+        events.emit("end", exit=config.EXIT_INTERNAL)
+        return config.EXIT_INTERNAL
+
+    ui.ok(f"写出 {rep.dst}  {rep.new_bytes:,} 字节")
+    events.emit("result", ok=True, written=1,
+                out_dir=str(Path(rep.dst).parent),
+                engine="gamemaker", engine_name="GameMaker",
+                detail=f"{data_file.name} -> {Path(rep.dst).name}",
+                categories={}, notes=list(rep.rebuilt) + list(rep.notes),
+                fallback=False, error=None, elapsed=round(elapsed, 1))
+    events.emit("end", exit=config.EXIT_OK)
+    return config.EXIT_OK
+
+
+def cmd_categories() -> int:
+    ui.step("可用分类")
+    for key, label in config.CATEGORY_LABEL.items():
+        ui.ok(f"{key:<8} {label}")
+        events.emit("category", key=key, label=label)
+    return config.EXIT_OK
+
+
+def cmd_tools() -> int:
+    ui.step("外部工具自检")
+    missing = 0
+    for key, path, desc, expect in tool_paths.status():
+        if path:
+            ui.ok(f"{key:<12} {path}")
+        else:
+            missing += 1
+            ui.warn(f"{key:<12} 缺失（期望 {expect}）")
+            ui.detail(desc)
+        events.emit("tool", key=key, ok=bool(path),
+                    path=str(path) if path else None,
+                    expect=str(expect), desc=desc)
+    if missing:
+        ui.sep()
+        ui.info(f"缺失 {missing} 个工具。{tool_paths.repair_hint()}")
+    else:
+        ui.ok("外部工具齐全")
+    ui.sep()
+    ui.info(f"运行环境: {_env_desc()}")
+    return config.EXIT_TOOL if missing else config.EXIT_OK
+
+
+def _env_desc() -> str:
+    """一行环境摘要，方便反馈问题时贴出来。"""
+    import importlib.util
+    import platform
+
+    kind = "打包版(exe)" if config.IS_FROZEN else "源码版"
+    # 这里故意用 find_spec 而不是 import numpy：
+    # 写成 import numpy 的话 PyInstaller 会当成静态依赖，
+    # 把我们在构建时特意排除掉的 numpy 又塞回包里。
+    np_on = importlib.util.find_spec("numpy") is not None
+    return (f"Python {platform.python_version()} / {kind} / "
+            f"numpy {'已启用' if np_on else '未启用'}")
+
+
+def cmd_engines() -> int:
+    ui.step("已加载的引擎模块")
+    for key, name in engine_names():
+        ui.ok(f"{key:<12} {name}")
+        events.emit("engine", key=key, name=name)
+    if LOAD_ERRORS:
+        ui.sep()
+        ui.warn("以下模块加载失败:")
+        for name, err in LOAD_ERRORS.items():
+            ui.detail(f"{name}: {err}")
+    return 0
+
+
+def cmd_channels() -> int:
+    """列出两条通道的状态（--channels）。
+
+    这张表就是「哪种引擎现在能走自研」的唯一答案：自研那栏写着待补的，
+    勾了自研开关也会退回第三方（判定见 me/channel.py）。
+    """
+    from me import channel
+
+    ui.step("拆包通道")
+    ui.info("默认第三方；实验性功能 + 自研开关同时启用才换自研；CTF 只有自研。")
+    for cap in channel.matrix():
+        third = cap.third_name if cap.third else "无（不接第三方）"
+        self_ = cap.self_name if cap.self_ready else "待补（V0.17）"
+        ui.ok(f"{cap.key:<10} 第三方: {third}")
+        ui.detail(f"{'':<10} 自研  : {self_}")
+        events.emit("channel_cap", engine=cap.key,
+                    third=cap.third, third_name=third,
+                    self_ready=cap.self_ready, self_name=self_)
+    return config.EXIT_OK
+
+
+def cmd_setup() -> int:
+    """显示 setup.ini 的位置和当前设置。"""
+    ui.step("配置（setup.ini）")
+    path = setup_ini.setup_path()
+    cfg = setup_ini.load()
+
+    ui.ok(f"文件位置: {path}")
+    if not path.exists():
+        ui.warn("文件不存在，写入失败，使用内置默认值")
+    if cfg["error"]:
+        ui.warn(f"配置异常: {cfg['error']}")
+
+    ui.sep()
+    ui.info(f"保存路径: {cfg[setup_ini.KEY_PATH]}")
+    ui.detail(f"实际位置: {setup_ini.output_root()}")
+    events.emit("config", file=str(path), exists=path.exists(),
+                out_path=cfg[setup_ini.KEY_PATH],
+                out_root=str(setup_ini.output_root()),
+                error=cfg["error"] or None)
+    return config.EXIT_OK
+
+
+def cmd_detect(target) -> int:
+    """只识别不提取。"""
+    if not target:
+        ui.error("--detect 需要指定路径")
+        return config.EXIT_ARGS
+    path = Path(target).expanduser()
+    if not path.exists():
+        ui.error(f"路径不存在: {path}")
+        return config.EXIT_TARGET
+    det = detect_engine(path)
+    ui.ok(f"识别结果: {det.describe()}")
+    ui.detail(f"引擎键: {det.engine}")
+    if det.shell:
+        ui.detail(f"保护壳: {det.shell}")
+    if det.inner:
+        ui.detail(f"壳内引擎: {det.inner}")
+    if det.entry:
+        ui.detail(f"主数据: {det.entry}")
+    for ev in det.evidence:
+        ui.detail(f"证据: {ev}")
+    if det.truncated:
+        ui.warn("扫描条目超上限，已截断；特征可能漏检")
+    if not det.is_known:
+        ui.warn("未能识别引擎，退回通用收集。")
+    events.emit("detect", engine=det.engine, name=det.name,
+                shell=det.shell, inner=det.inner, entry=det.entry,
+                evidence=list(det.evidence),
+                truncated=bool(det.truncated), known=bool(det.is_known))
+    return config.EXIT_OK
+
+
+def cmd_extract(target: Path, args, categories) -> int:
+    if not target.exists():
+        ui.error(f"路径不存在: {target}")
+        return config.EXIT_TARGET
+    res = run(target, out_dir=args.out, categories=categories,
+              deep=not args.no_deep, engine_key=args.engine,
+              keep_work=args.keep_work, progress=ui.progress,
+              fix=args.fix, experimental=args.experimental,
+              want_self=args.want_self)
+    if res.written == 0:
+        return config.EXIT_EMPTY
+    return config.EXIT_OK
+
+
+# ------------------------------------------------------------------ 交互
+# 菜单只做两件事：问用户、把选择翻译成命令行参数。真正的执行走 _run_argv，
+# 所以菜单和命令行永远是同一条路（见 me/menu_flow.py）。
+def interactive(args) -> int:
+    _warn_missing_tools()
+
+    target = _ask_target()
+    if target is None:
+        return config.EXIT_TARGET
+
+    sess = menu_flow.Session(
+        target=str(target), forced=args.engine or "",
+        experimental=args.experimental, want_self=args.want_self,
+        no_deep=args.no_deep, keep_work=args.keep_work, out=args.out or "",
+    )
+    det = None
+
+    while True:
+        ui.sep()
+        if not sess.analyzed:
+            # 步骤 1：先分析，不分析就不给提取/重建 —— 避免用户在没识别之前乱按
+            ui.info(f"目标: {sess.target}")
+            ui.detail("先分析目标，再决定做什么（分析走的是 --detect 同一条路径）")
+            items = menu_flow.pre_analyze_options()
+            idx = ui.menu("请选择:", [label for label, _k in items])
+            act = items[idx][1]
+
+            if act == menu_flow.EXIT:
+                return config.EXIT_OK
+            if act == menu_flow.PATH:
+                nt = _ask_target()
+                if nt is not None:
+                    sess.target = str(nt)
+                    sess.engine_key = ""
+                    sess.engine_name = ""
+                    sess.analyzed = False
+                continue
+            if act == menu_flow.ANALYZE:
+                det = _analyze(sess)
+                if det is None:
+                    continue
+                sess.engine_key = det.engine
+                sess.engine_name = det.name
+                sess.analyzed = True
+                ui.ok(menu_flow.result_banner(sess, det))
+            continue
+
+        # 步骤 2：分析完，按引擎能力给菜单
+        ui.info(menu_flow.result_banner(sess, det))
+        ui.info(f"保存到: {setup_ini.describe()}")
+        if menu_flow.channel_switchable(sess.effective_engine):
+            ui.info(f"拆包通道: {menu_flow.channel_label(sess)}"
+                    f" —— {menu_flow.channel_detail(sess)}")
+
+        items = menu_flow.main_options(sess)
+        idx = ui.menu("请选择接下来的操作:", [label for label, _k in items])
+        act = items[idx][1]
+
+        if act == menu_flow.EXIT:
+            return config.EXIT_OK
+
+        if act == menu_flow.PATH:
+            nt = _ask_target()
+            if nt is not None:
+                sess.target = str(nt)
+                sess.engine_key = ""
+                sess.engine_name = ""
+                sess.analyzed = False
+                det = None
+            continue
+
+        if act == menu_flow.DETAIL:
+            if det is not None:
+                _show_detail(det)
+            continue
+
+        if act == menu_flow.EXTRACT:
+            _menu_extract(sess)
+            continue
+
+        if act == menu_flow.REPAIR_MENU:
+            _menu_repair(sess)
+            continue
+
+        if act == menu_flow.CHANNEL_MENU:
+            _menu_channel(sess)
+            continue
+
+        if act == menu_flow.MORE:
+            _menu_more(sess, args)
+            continue
+
+
+def _analyze(sess):
+    """分析目标：和 --detect 是同一套识别，顺手发 detect 事件。"""
+    ui.step("分析目标 ...")
+    det = detect_engine(Path(sess.target))
+    events.emit("detect", engine=det.engine, name=det.name,
+                shell=det.shell, inner=det.inner, entry=det.entry,
+                evidence=list(det.evidence),
+                truncated=bool(det.truncated), known=bool(det.is_known))
+    ui.ok(f"识别结果: {det.describe()}")
+    for ev in det.evidence[:6]:
+        ui.detail(ev)
+    if det.truncated:
+        ui.warn("扫描条目超上限，已截断；特征可能漏检")
+    if not det.is_known:
+        ui.warn("未能识别引擎，退回通用收集。")
+    return det
+
+
+def _menu_extract(sess) -> None:
+    ui.sep()
+    items = menu_flow.extract_options(sess)
+    idx = ui.menu("提取什么:", [label for label, _k in items])
+    key = items[idx][1]
+    if key == "back":
+        return
+    cats = None if key == "cat:all" else set(key[4:].split(","))
+    argv = menu_flow.build_extract_argv(sess, cats)
+    ui.detail("执行: " + " ".join(argv))
+    _run_argv(argv)
+
+
+def _menu_repair(sess) -> None:
+    ui.sep()
+    for line in menu_flow.REPAIR_WARNING.split("\n"):
+        ui.warn(line)
+    items = menu_flow.repair_options()
+    idx = ui.menu("请选择修复模式:", [label for label, _k in items])
+    mode = items[idx][1]
+    if mode == "back":
+        return
+    argv = menu_flow.build_repair_argv(sess, mode)
+    ui.detail("执行: " + " ".join(argv))
+    _run_argv(argv)
+
+
+def _menu_channel(sess) -> None:
+    ui.sep()
+    ui.info(f"当前通道: {menu_flow.channel_label(sess)}"
+            f"（{menu_flow.channel_detail(sess)}）")
+    items = menu_flow.channel_options(sess)
+    idx = ui.menu("切换拆包通道:", [label for label, _k in items])
+    action = items[idx][1]
+    if action == "back":
+        return
+    if action == "switch_self":
+        sess.experimental = True
+        sess.want_self = True
+    elif action == "switch_third":
+        sess.want_self = False
+    ui.ok(f"通道: {menu_flow.channel_label(sess)}")
+    ui.detail("之后的提取/重建都会带上 "
+              + ("--experimental --self" if sess.want_self else "--experimental"))
+
+
+def _menu_more(sess, args) -> None:
+    ui.sep()
+    items = menu_flow.more_options(sess)
+    idx = ui.menu("更多选项:", [label for label, _k in items])
+    action = items[idx][1]
+    if action == "back":
+        return
+    if action == "toggle_deep":
+        sess.no_deep = not sess.no_deep
+        ui.ok(f"不解容器: {'开' if sess.no_deep else '关'}")
+        return
+    if action == "toggle_work":
+        sess.keep_work = not sess.keep_work
+        ui.ok(f"保留中间产物: {'开' if sess.keep_work else '关'}")
+        return
+    if action == "engine":
+        _menu_engine(sess)
+        return
+    if action == "tools":
+        cmd_tools()
+    elif action == "engines":
+        cmd_engines()
+    elif action == "setup":
+        cmd_setup()
+    elif action == "version":
+        cmd_version()
+
+
+def _ask_target():
+    """问用户要路径，返回 Path 或 None。"""
+    # ui.ask 已经去过引号/空白/BOM，这里再兜一次底（用户可能从别处粘进来）
+    raw = ui.clean_input(ui.ask("请输入游戏路径（文件或目录）"))
+    if not raw:
+        ui.error("未输入路径")
+        return None
+    target = Path(raw)
+    if not target.exists():
+        ui.error(f"路径不存在: {target}")
+        return None
+    return target
+
+
+def _show_detail(det) -> None:
+    """把识别详情完整打一遍。"""
+    ui.sep()
+    ui.info(f"引擎键  : {det.engine}")
+    ui.info(f"显示名  : {det.name}")
+    if det.shell:
+        ui.info(f"保护壳  : {det.shell}")
+    if det.inner:
+        ui.info(f"壳内引擎: {det.inner} ({det.inner_name})")
+    if det.entry:
+        ui.info(f"主数据  : {det.entry}")
+    if det.evidence:
+        ui.info("证据:")
+        for ev in det.evidence:
+            ui.detail(ev)
+    else:
+        ui.info("证据: （无）")
+
+
+def _menu_engine(sess) -> None:
+    """强制指定引擎（-e）。自动识别被二次打包/特征被删时，用户自己知道答案。"""
+    from me.engines.menu import build_engine_menu
+    items = build_engine_menu()
+    ui.sep()
+    idx = ui.menu("指定引擎（-e）:", [label for label, _key in items])
+    label, key = items[idx]
+    sess.forced = key or ""
+    if key:
+        ui.ok(f"已指定引擎: {label}")
+        ui.detail(f"之后的提取/重建都带 -e {key}（分析结果仅作参考）")
+    else:
+        ui.ok("已切换为自动识别")
+
+
+def _warn_missing_tools() -> None:
+    """启动时提示缺哪些外部工具，缺失不影响可跑的引擎。"""
+    missing = [key for key, path, _desc, _exp in tool_paths.status() if not path]
+    if missing:
+        ui.warn(f"外部工具缺失: {', '.join(missing)}")
+        ui.detail(tool_paths.repair_hint())
+
+
+# ------------------------------------------------------------------ 工具
+_BAD_ONLY = object()
+
+
+def _parse_only(text):
+    """解析 --only 参数，非法时返回哨兵值。"""
+    if not text:
+        return None
+    cats = set()
+    for part in text.replace("，", ",").split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        if part not in config.CATEGORY_LABEL:
+            ui.error(f"未知分类: {part}（可选: "
+                     f"{', '.join(config.CATEGORY_LABEL)}）")
+            return _BAD_ONLY
+        cats.add(part)
+    return cats or None
+
+
+def _prescan(argv=None):
+    """解析参数之前先看有没有 --json / --cancel-file。
+
+    事件流必须在任何人类输出之前打开，而 argparse 的 --help 和报错
+    也算输出，所以只能先把 argv 扫一遍。
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    argv = list(argv)
+    json_mode = "--json" in argv
+    cancel = None
+    for i, item in enumerate(argv):
+        if item == "--cancel-file" and i + 1 < len(argv):
+            cancel = argv[i + 1]
+        elif item.startswith("--cancel-file="):
+            cancel = item.split("=", 1)[1]
+    return json_mode, cancel
+
+
+def _entry(argv=None) -> int:
+    """真正的入口：初始化控制台 → 跑主流程 → 收尾。
+
+    收尾放在 finally 里，这样 argparse 报错退出、用户 Ctrl+C 中断
+    这些路径也能正常还原代码页、并在双击启动时把窗口留住。
+    """
+    json_mode, cancel = _prescan(argv)
+    if json_mode:
+        events.enable(cancel)
+    console.setup()
+    # 让 setup.ini 一开始就出现在程序旁边，用户不用先去别处找格式
+    setup_ini.ensure()
+    # 把自身位置写进 %LOCALAPPDATA%\MultiExtractor\CLIPath.ini（只放路径），
+    # 把版本与署名写进 CLI 目录下的 version.ini：整包挪盘之后壳必须立刻
+    # 拿到新位置，版本也一起跟过去
+    cli_path_ini.write()
+    code = config.EXIT_OK
+    try:
+        code = main(argv)
+    except _ArgError as exc:
+        events.begin(app=config.APP_NAME, version=config.VERSION,
+                     pid=os.getpid(), target=None, engine=None,
+                     only=None, out=None, cancel_file=cancel)
+        ui.error(f"参数错误: {exc}")
+        code = config.EXIT_ARGS
+    except events.Cancelled:
+        ui.warn("已取消")
+        code = config.EXIT_CANCELLED
+    except KeyboardInterrupt:
+        print()
+        ui.warn("已中断")
+        code = config.EXIT_INTERRUPT
+    except SystemExit as exc:
+        code = int(exc.code or 0)
+    except Exception as exc:  # noqa: BLE001
+        ui.error(f"内部异常: {type(exc).__name__}: {exc}")
+        code = config.EXIT_INTERNAL
+    finally:
+        events.finish(code)
+        console.pause_if_needed()
+        console.restore()
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(_entry())
