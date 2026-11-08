@@ -238,6 +238,53 @@ def test_write_banks():
         check(slack == [(5, 100)], "Template 图像 #5 的 +100 B 记为 slack", str(slack))
 
 
+def test_app_header():
+    """应用设置段：字段值 + 逐字节回写。"""
+    section("6. 应用设置段")
+    present = [p for p in SAMPLES if p.exists()]
+    if not present:
+        global SKIPPED
+        SKIPPED += 1
+        print("  [skip] 参考 MFA 样本不在本机")
+        return
+
+    for path in present:
+        raw = path.read_bytes()
+        pre, banks = mfa.read_project_prefix(raw)
+        app, end = mfa.read_app_header(raw, banks.app_offset)
+        tag = path.name
+
+        check(app.width == 640 and app.height == 360, f"{tag} 窗口 640x360",
+              f"{app.width}x{app.height}")
+        check(app.frame_rate == 60, f"{tag} 帧率 60", app.frame_rate)
+        check(app.author == "Ambratolm", f"{tag} 作者", app.author)
+        check(len(app.players) == 4, f"{tag} 4 个玩家", len(app.players))
+        if app.players:
+            p0 = app.players[0]
+            check(p0.type == 5, f"{tag} 玩家类型 5", p0.type)
+            check(len(p0.keys) == 16, f"{tag} 每人 16 个键", len(p0.keys))
+            check(p0.keys[:4] == [38, 40, 37, 39], f"{tag} 上下左右键码",
+                  str(p0.keys[:4]))
+        check(app.binary_count == 0, f"{tag} 没有二进制文件", app.binary_count)
+
+        rebuilt = mfa.build_app_header(app)
+        orig = raw[banks.app_offset:end]
+        check(rebuilt == orig, f"{tag} 应用设置段逐字节回写（{len(orig)} B）",
+              f"{len(rebuilt)} vs {len(orig)}")
+
+    # 字段被改坏：窗口尺寸荒唐时要报错
+    raw = bytearray(present[0].read_bytes())
+    pre, banks = mfa.read_project_prefix(bytes(raw))
+    app, end = mfa.read_app_header(bytes(raw), banks.app_offset)
+    app.width = 999999
+    app.height = 999999
+    try:
+        mfa.read_app_header(mfa.build_app_header(app), 0)
+        check(False, "窗口尺寸荒唐要报错")
+    except mfa.MfaError:
+        check(True, "窗口尺寸荒唐要报错")
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -247,6 +294,7 @@ def main() -> int:
     test_samples()
     test_banks()
     test_write_banks()
+    test_app_header()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")

@@ -41,13 +41,18 @@ CString 编码（实测）：u32 长度，最高位 ``0x80000000`` 表示 UTF-16
     Template.mfa          193,891 B  MFU2 v6  build 292  工程名 'Template'
     Platformer Engine.mfa 423,160 B  MFU2 v7  build 292  工程名 'Platformer Engine'
 
-后续要补的两块（都还没落地，别在这儿假装读懂）：
-  * **图像条目布局**：库头（graphicMode / 调色板 / 图像数）已经读得出来，
-    但条目字段宽度不是 4 字节对齐的（真样本 0x1CFA 起：00 00 00 00 /
-    63 92 00 00 / 01 00 00 00 / 00 4F 09 00 / 00 30 00 30 00 …），
-    照 CCN 的 2.5+ 布局去读会得到「6151x0」这种荒谬尺寸；
-  * 应用设置之后的全局值 / 全局字符串 / 全局事件、帧（绝对偏移表指向）、
-    帧后的对象 chunk 列表（u8 id + i32 size，id=0 收尾）。
+已经落地的部分（都有真样本逐字节回写验证）：
+  * 前段：头 + 三条 CString + 缩略图；
+  * 五个库：字体（108 B 定长条目）、音频、音乐、图标库、图像库
+    （图像条目 = 40 B 头 + zlib 流）；build_banks 能把它们原样写回；
+  * 应用设置段：六条字符串 + 宽高/颜色/flags + 帮助/Vitalize + 分数/命/帧率
+    + 构建类型 + 四个路径 + 安装数据 + 玩家控制（每人类型/键数/键码）。
+
+还没落地（按顺序）：
+  * 菜单栏（MenuBar）、窗口菜单号、菜单图片；
+  * 全局值 / 全局字符串 / 全局事件；
+  * 图形模式、图标句柄、限定符、扩展；
+  * 帧偏移表 + 各帧 + 帧后的对象 chunk 列表（u8 id + i32 size，id=0 收尾）。
 """
 
 import struct
@@ -558,17 +563,6 @@ def read_project_prefix(buf: bytes):
     return pre, read_banks(buf, start)
 
 
-def build_project_prefix(pre: "MfaPreamble", banks: MfaBanks) -> bytes:
-    """把前段 + 五个库写回；真样本上等于原文件 ``[:banks.app_offset]``。
-
-    注意前段里的 ``banks_raw`` 是「原样保留的库字节」，这里要换成重新写出来的
-    库，所以先把它清空 —— 不清就会写两遍（实测就是两倍长度）。
-    """
-    import dataclasses
-    head = dataclasses.replace(pre, banks_raw=b"")
-    return build_preamble(head) + build_banks(banks)
-
-
 def describe_banks(b: MfaBanks) -> str:
     parts = [f"字体 {len(b.fonts)}", f"音频 {len(b.sounds)}", f"音乐 {len(b.music)}"]
     if b.icons:
@@ -680,3 +674,141 @@ def build_banks(b: MfaBanks) -> bytes:
     if b.images:
         _write_image_bank(w, b.images, TAG_IMAGES)
     return w.getvalue()
+
+# ------------------------------------------------------------------ 应用设置段
+# 布局（两个真样本逐字段核对，落点完全一致）：
+#
+#   yuniversal 应用名 / 作者 / 描述 / 版权 / 公司 / 版本
+#   i32 宽 / i32 高 / 4B 边框色 / u32 显示 flags / u32 图形 flags
+#   yuniversal 帮助文件 / Vitalize 预览
+#   i32 初始分 / i32 初始命 / i32 帧率 / i32 构建类型
+#   yuniversal 目标文件 / 效果目录 / 命令行 / 关于
+#   i32 安装数据大小
+#   u32 二进制文件数（真样本都是 0；非 0 时布局未知，直接报错不猜）
+#   u32 玩家数，每人：i32 类型 / i32 键数 / 键数 x i32 键码
+#
+# 实测：两个样本都是 640x360、帧率 60、4 个玩家、每人 16 个键
+# （前八个 38/40/37/39 = 上下左右，然后 32 空格、17 Ctrl、16 Shift、13 回车）。
+
+
+@dataclass
+class MfaPlayerControl:
+    type: int = 0
+    keys: List[int] = None
+
+    def __post_init__(self):
+        self.keys = self.keys if self.keys is not None else []
+
+
+@dataclass
+class MfaAppHeader:
+    app_name: str = ""
+    author: str = ""
+    description: str = ""
+    copyright: str = ""
+    company: str = ""
+    version: str = ""
+    width: int = 0
+    height: int = 0
+    border_color: bytes = b"\x00\x00\x00\x00"
+    display_flags: int = 0
+    graphic_flags: int = 0
+    help_file: str = ""
+    vitalize_preview: str = ""
+    init_score: int = 0
+    init_lives: int = 0
+    frame_rate: int = 60
+    build_type: int = 0
+    target_filename: str = ""
+    effects_folder: str = ""
+    command_line: str = ""
+    about: str = ""
+    installer_size: int = 0
+    binary_count: int = 0
+    players: List[MfaPlayerControl] = None
+
+    def __post_init__(self):
+        self.players = self.players if self.players is not None else []
+
+
+def read_app_header(buf: bytes, pos: int):
+    """读应用设置段，返回 (MfaAppHeader, 段后偏移)。"""
+    r = Reader(buf, pos)
+    h = MfaAppHeader()
+    h.app_name = r.cstring()
+    h.author = r.cstring()
+    h.description = r.cstring()
+    h.copyright = r.cstring()
+    h.company = r.cstring()
+    h.version = r.cstring()
+    h.width = r.i32()
+    h.height = r.i32()
+    h.border_color = r.take(4)
+    h.display_flags = r.u32()
+    h.graphic_flags = r.u32()
+    h.help_file = r.cstring()
+    h.vitalize_preview = r.cstring()
+    h.init_score = r.i32()
+    h.init_lives = r.i32()
+    h.frame_rate = r.i32()
+    h.build_type = r.i32()
+    h.target_filename = r.cstring()
+    h.effects_folder = r.cstring()
+    h.command_line = r.cstring()
+    h.about = r.cstring()
+    h.installer_size = r.i32()
+    h.binary_count = r.u32()
+    if h.binary_count:
+        raise MfaError(f"二进制文件段有 {h.binary_count} 条，布局还没落地")
+    for _ in range(r.u32()):
+        p = MfaPlayerControl(type=r.i32())
+        n = r.i32()
+        if n < 0 or n > 256:
+            raise MfaError(f"玩家按键数异常 {n}")
+        p.keys = [r.i32() for _ in range(n)]
+        h.players.append(p)
+    if not (0 <= h.width <= 16384 and 0 <= h.height <= 16384):
+        raise MfaError(f"窗口尺寸异常 {h.width}x{h.height}")
+    return h, r.pos
+
+
+def build_app_header(h: MfaAppHeader) -> bytes:
+    w = Writer()
+    for s in (h.app_name, h.author, h.description, h.copyright, h.company, h.version):
+        w.cstring(s)
+    w.i32(h.width)
+    w.i32(h.height)
+    w.raw(h.border_color)
+    w.u32(h.display_flags)
+    w.u32(h.graphic_flags)
+    w.cstring(h.help_file)
+    w.cstring(h.vitalize_preview)
+    w.i32(h.init_score)
+    w.i32(h.init_lives)
+    w.i32(h.frame_rate)
+    w.i32(h.build_type)
+    for s in (h.target_filename, h.effects_folder, h.command_line, h.about):
+        w.cstring(s)
+    w.i32(h.installer_size)
+    w.u32(h.binary_count)
+    if h.binary_count:
+        raise MfaError("二进制文件段还不支持写")
+    w.u32(len(h.players))
+    for p in h.players:
+        w.i32(p.type)
+        w.i32(len(p.keys))
+        for k in p.keys:
+            w.i32(k)
+    return w.getvalue()
+
+
+def build_project_prefix(pre: "MfaPreamble", banks: MfaBanks) -> bytes:
+    """前段 + 五个库写回；真样本上等于原文件 ``[:banks.app_offset]``。"""
+    import dataclasses
+    head = dataclasses.replace(pre, banks_raw=b"")
+    return build_preamble(head) + build_banks(banks)
+
+
+def describe_app(h: MfaAppHeader) -> str:
+    return (f"{h.app_name!r} 作者 {h.author!r} {h.width}x{h.height} "
+            f"帧率 {h.frame_rate} 玩家 {len(h.players)}")
