@@ -1278,3 +1278,45 @@ nameLength 的顺序；名字是 nameLength 个 UTF-16 字符，随后是数据�
   CString 编码 6 项、合成前段回环 7 项、真样本前段 12 项、资源库 19 项
   （含「音频库标记被改坏要抛 MfaError」）。
 全量：ME_NO_NET=1 python selftest/run_all.py -> 36/36 通过。
+
+------------------------------------------------------------------------------
+V0.19 第三轮：图像条目布局拿下，五个库可逐字节重建（0.19WIP Beta 00099）
+------------------------------------------------------------------------------
+上一轮卡在「图像条目字段不是 4 字节对齐」。这一轮找到了真相：条目是
+**40 字节头 + zlib 流**，对齐错觉来自我把「没有 reserved 字段」当成了「有」。
+
+头（图标库与图像库同一个布局）：
+  u32 handle / i32 checksum / u32 references / u32 dataSize
+  u16 width / u16 height / u8 graphicMode / u8 flags / i16 保留
+  i16 hotspotX / hotspotY / actionX / actionY
+  4B  transparent / u32 declSize
+  然后 (dataSize - 4) 字节 zlib 流 —— 解压出来正好 declSize 字节
+
+实测（Template）：
+  #0 48x48 mode=7 3 通道 decl=6912 dsize=2383
+  #3 300x300 mode=4 4 通道 decl=360000 dsize=33814
+  12 条图标正好收在下一个 AGMI（0xAFED），一条不多一条不少；
+  15 条图像正好收在应用设置段的工程名前面（0x2E4CB 处是 08 00 00 80 + 'Template'）。
+
+有一条例外要如实记：Template 的 #5 是 50x50，却解压出 10100 字节
+（= 50×50×4 + 100，正好多 50 行 × 2 字节）。不猜它是什么，先在 MfaImage
+上暴露成 slack；写回时按原样使用 payload，所以不影响重建。
+
+新增：
+  * MfaImage（含 pixels / payload / channels / slack）
+  * _read_image / _write_image
+  * build_banks：五个库写回
+  * read_project_prefix / build_project_prefix
+
+重建验证（这是这轮最硬的证据）：
+  Template.mfa          前 189,643 B 逐字节相等（全文件 193,891 B，占 97.8%）
+  Platformer Engine.mfa 前 377,839 B 逐字节相等（全文件 423,160 B，占 89.3%）
+  也就是说：头、三条字符串、缩略图、字体库、音频库、音乐库、图标库（12/24 张）、
+  图像库（15/33 张）全部能原样写回去。
+
+自测：test_mfa 从 44 项扩到 61 项，全过
+  新增第 5 段「库的写入」：前段 + 五个库逐字节重建、图像尺寸/通道/压缩前后长度
+  自洽、条目数 = 头里的计数、Template #5 的 +100 B 必须记成 slack。
+全量：ME_NO_NET=1 python selftest/run_all.py -> 36/36 通过。
+
+下一步：应用设置段（Template 只剩 4,248 B 没拿下，先拿它开刀）。

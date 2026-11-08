@@ -255,6 +255,7 @@ class FontEntry:
     quality: int = 0
     pitch_family: int = 0
     name: str = ""
+    name_raw: bytes = b""      # 定长 64 字节，原样留着，写回时不重新补 0
     data: bytes = b""
 
     @property
@@ -275,6 +276,7 @@ class SoundEntry:
     flags: int = 0
     frequency: int = 0
     name: str = ""
+    name_raw: bytes = b""
     data: bytes = b""
 
     def __repr__(self) -> str:
@@ -291,6 +293,7 @@ class MusicEntry:
     flags: int = 0
     frequency: int = 0
     name: str = ""
+    name_raw: bytes = b""
     data: bytes = b""
 
     def __repr__(self) -> str:
@@ -298,8 +301,57 @@ class MusicEntry:
 
 
 @dataclass
+class MfaImage:
+    """MFA 图像库 / 图标库的一条图像（40 字节头 + zlib 数据）。"""
+    handle: int = 0
+    checksum: int = 0
+    references: int = 0
+    data_size: int = 0
+    width: int = 0
+    height: int = 0
+    graphic_mode: int = 0
+    flags: int = 0
+    hotspot_x: int = 0
+    hotspot_y: int = 0
+    action_x: int = 0
+    action_y: int = 0
+    transparent: bytes = b"\x00\x00\x00\x00"
+    decl_size: int = 0
+    pixels: bytes = b""
+    payload: bytes = b""       # 盘上的 zlib 流，写回时原样用
+
+    @property
+    def channels(self) -> int:
+        """每像素字节数；不是整数时返回 0（见 ``slack``）。"""
+        n = self.width * self.height
+        if not n:
+            return 0
+        return len(self.pixels) // n if len(self.pixels) % n == 0 else 0
+
+    @property
+    def slack(self) -> int:
+        """解压数据比 ``宽×高×通道数`` 多出来的字节数。
+
+        真样本里有这种条目（Template 的 #5：50x50 却解压出 10100 字节，
+        正好多 100 = 50 行 × 2 字节），说明某些模式下每行还带一点附加数据。
+        这里只如实记录，不猜它是什么。
+        """
+        n = self.width * self.height
+        if not n or not self.pixels:
+            return 0
+        ch = len(self.pixels) // n
+        return len(self.pixels) - n * ch
+
+    def __repr__(self) -> str:
+        extra = f" +{self.slack}B" if self.slack else ""
+        return (f"<Image #{self.handle} {self.width}x{self.height} "
+                f"mode={self.graphic_mode} flags=0x{self.flags:02X} "
+                f"{self.channels}ch {self.decl_size}B{extra}>")
+
+
+@dataclass
 class ImageBankHeader:
-    """图标库 / 图像库的公共头。条目本身还没解析（见上面的说明）。"""
+    """图标库 / 图像库：头 + 全部条目。"""
     label: str = ""
     graphic_mode: int = 0
     palette_version: int = 0
@@ -307,7 +359,11 @@ class ImageBankHeader:
     palette: List[bytes] = None
     count: int = 0
     entries_offset: int = 0
-    raw_tail: bytes = b""
+    entries: List[MfaImage] = None
+
+    def __post_init__(self):
+        self.palette = self.palette or []
+        self.entries = self.entries or []
 
     def __repr__(self) -> str:
         return (f"<{self.label} mode={self.graphic_mode} "
@@ -322,6 +378,7 @@ class MfaBanks:
     music: List[MusicEntry] = None
     icons: Optional[ImageBankHeader] = None
     images: Optional[ImageBankHeader] = None
+    app_offset: int = 0        # 图像库之后、应用设置段的起始偏移
 
     def __post_init__(self):
         self.fonts = self.fonts or []
@@ -348,8 +405,8 @@ def _read_font(r: Reader) -> FontEntry:
     f.clip_precision = r.take(1)[0]
     f.quality = r.take(1)[0]
     f.pitch_family = r.take(1)[0]
-    raw_name = r.take(FONT_NAME_CHARS * 2)
-    f.name = raw_name.decode("utf-16-le", "replace").rstrip("\x00").strip()
+    f.name_raw = r.take(FONT_NAME_CHARS * 2)
+    f.name = f.name_raw.decode("utf-16-le", "replace").rstrip("\x00").strip()
     if f.data_size < 0 or f.data_size > len(r.buf):
         raise MfaError(f"字体数据长度异常 {f.data_size}")
     f.data = r.take(f.data_size)
@@ -371,7 +428,8 @@ def _read_sound(r: Reader) -> SoundEntry:
     inner = Reader(blob)
     if name_len < 0 or name_len * 2 > len(blob):
         raise MfaError(f"音频名字长度异常 {name_len}")
-    s.name = inner.take(name_len * 2).decode("utf-16-le", "replace").rstrip("\x00")
+    s.name_raw = inner.take(name_len * 2)
+    s.name = s.name_raw.decode("utf-16-le", "replace").rstrip("\x00")
     s.data = blob[inner.pos:]
     return s
 
@@ -389,7 +447,8 @@ def _read_music(r: Reader) -> MusicEntry:
         raise MfaError(f"音乐数据长度异常 {m.data_size}")
     if name_len < 0 or name_len > m.data_size:
         raise MfaError(f"音乐名字长度异常 {name_len}")
-    m.name = r.take(name_len * 2).decode("utf-16-le", "replace").rstrip("\x00")
+    m.name_raw = r.take(name_len * 2)
+    m.name = m.name_raw.decode("utf-16-le", "replace").rstrip("\x00")
     m.data = r.take(m.data_size - name_len * 2)
     return m
 
@@ -407,13 +466,57 @@ def _read_image_bank_header(r: Reader, label: str) -> ImageBankHeader:
     return h
 
 
-def read_banks(buf: bytes, start: int) -> MfaBanks:
-    """从 ``ATNF`` 开始把四个库读出来。
+def _read_image(r: Reader) -> MfaImage:
+    """一条图像：40 字节头 + zlib 流。
 
-    图标库和图像库的条目还没落地，所以这两段只读到「库头 + 图像数」；
-    图标条目按「下一个 AGMI」切开（真样本里 AGMI 在条目数据中不出现），
-    图像库之后的内容不再推进 —— 调用方需要的话看 ``entries_offset``。
+    头（实测，图标库与图像库同一个布局）::
+
+        u32 handle / i32 checksum / u32 references / u32 dataSize
+        u16 width / u16 height / u8 graphicMode / u8 flags / i16 保留
+        i16 hotspotX / i16 hotspotY / i16 actionX / i16 actionY
+        4B  transparent / u32 declSize
+        dataSize - 4 字节 zlib 流（解压后正好 declSize 字节）
+
+    实测：48x48 mode=7 -> decl 6912 = 48*48*3；16x16 mode=4 -> 768。
+    12 条图标正好收在下一个 AGMI，15 条图像正好收在应用设置段的工程名前面。
     """
+    import zlib
+
+    img = MfaImage()
+    img.handle = r.u32()
+    img.checksum = r.i32()
+    img.references = r.u32()
+    img.data_size = r.u32()
+    img.width = r.u16()
+    img.height = r.u16()
+    img.graphic_mode = r.take(1)[0]
+    img.flags = r.take(1)[0]
+    r.take(2)                                # 保留
+    img.hotspot_x = struct.unpack("<h", r.take(2))[0]
+    img.hotspot_y = struct.unpack("<h", r.take(2))[0]
+    img.action_x = struct.unpack("<h", r.take(2))[0]
+    img.action_y = struct.unpack("<h", r.take(2))[0]
+    img.transparent = r.take(4)
+    img.decl_size = r.u32()
+
+    if img.data_size < 4 or img.data_size > len(r.buf):
+        raise MfaError(f"图像数据长度异常 {img.data_size} @0x{r.pos - 40:X}")
+    payload = r.take(img.data_size - 4)
+    img.payload = payload
+    try:
+        img.pixels = zlib.decompress(payload)
+    except zlib.error as exc:
+        raise MfaError(f"图像 #{img.handle} zlib 解压失败: {exc}") from exc
+    if len(img.pixels) != img.decl_size:
+        raise MfaError(f"图像 #{img.handle} 解压后 {len(img.pixels)} B，"
+                       f"头里写 {img.decl_size} B")
+    if img.width and img.height and len(img.pixels) < img.width * img.height:
+        raise MfaError(f"图像 #{img.handle} 像素数比尺寸还少")
+    return img
+
+
+def read_banks(buf: bytes, start: int) -> MfaBanks:
+    """从 ``ATNF`` 开始把五个库（字体/音频/音乐/图标/图像）全部读出来。"""
     r = Reader(buf, start)
     b = MfaBanks()
 
@@ -435,19 +538,35 @@ def read_banks(buf: bytes, start: int) -> MfaBanks:
     if r.tag() != TAG_ICONS:
         raise MfaError(f"图标库标记不对 @0x{r.pos - 4:X}")
     b.icons = _read_image_bank_header(r, "图标库")
+    for _ in range(b.icons.count):
+        b.icons.entries.append(_read_image(r))
 
-    # 图标条目布局未落地：按下一个 AGMI 切开
-    nxt = buf.find(TAG_IMAGES, r.pos)
-    if nxt < 0:
-        raise MfaError("找不到图像库标记")
-    b.icons.raw_tail = buf[r.pos:nxt]
-
-    r.pos = nxt
     if r.tag() != TAG_IMAGES:
-        raise MfaError("图像库标记不对")
+        raise MfaError(f"图像库标记不对 @0x{r.pos - 4:X}")
     b.images = _read_image_bank_header(r, "图像库")
-    b.images.raw_tail = b""            # 后面是应用设置，不能猜长度
+    for _ in range(b.images.count):
+        b.images.entries.append(_read_image(r))
+
+    b.app_offset = r.pos
     return b
+
+
+def read_project_prefix(buf: bytes):
+    """读「前段 + 五个库」，返回 (preamble, banks)。"""
+    pre = read_preamble(buf)
+    start = len(buf) - len(pre.banks_raw)
+    return pre, read_banks(buf, start)
+
+
+def build_project_prefix(pre: "MfaPreamble", banks: MfaBanks) -> bytes:
+    """把前段 + 五个库写回；真样本上等于原文件 ``[:banks.app_offset]``。
+
+    注意前段里的 ``banks_raw`` 是「原样保留的库字节」，这里要换成重新写出来的
+    库，所以先把它清空 —— 不清就会写两遍（实测就是两倍长度）。
+    """
+    import dataclasses
+    head = dataclasses.replace(pre, banks_raw=b"")
+    return build_preamble(head) + build_banks(banks)
 
 
 def describe_banks(b: MfaBanks) -> str:
@@ -457,3 +576,107 @@ def describe_banks(b: MfaBanks) -> str:
     if b.images:
         parts.append(f"图像 {b.images.count}")
     return " / ".join(parts)
+
+
+# ------------------------------------------------------------------ 库的写入
+def _write_font(w: Writer, f: FontEntry) -> None:
+    w.u32(f.handle)
+    w.i32(f.checksum)
+    w.u32(f.references)
+    w.i32(f.data_size if f.data_size else len(f.data))
+    w.i32(f.height)
+    w.i32(f.width)
+    w.i32(f.escapement)
+    w.i32(f.orientation)
+    w.i32(f.weight)
+    for v in (f.italic, f.underline, f.strike_out, f.charset,
+              f.out_precision, f.clip_precision, f.quality, f.pitch_family):
+        w.raw(bytes([v & 0xFF]))
+    name_raw = f.name_raw
+    if not name_raw:
+        name_raw = f.name.encode("utf-16-le").ljust(FONT_NAME_CHARS * 2, b"\x00")
+    w.raw(name_raw[:FONT_NAME_CHARS * 2].ljust(FONT_NAME_CHARS * 2, b"\x00"))
+    w.raw(f.data)
+
+
+def _write_sound(w: Writer, s: SoundEntry) -> None:
+    name_raw = s.name_raw or s.name.encode("utf-16-le")
+    w.u32(s.handle + 1)
+    w.i32(s.checksum)
+    w.u32(s.references)
+    w.i32(len(name_raw) + len(s.data))
+    w.u32(s.flags)
+    w.i32(s.frequency)
+    w.i32(len(name_raw) // 2)
+    w.raw(name_raw)
+    w.raw(s.data)
+
+
+def _write_music(w: Writer, m: MusicEntry) -> None:
+    name_raw = m.name_raw or m.name.encode("utf-16-le")
+    w.u32(m.handle)
+    w.i32(m.checksum)
+    w.u32(m.references)
+    w.i32(len(name_raw) + len(m.data))
+    w.u32(m.flags)
+    w.i32(m.frequency)
+    w.i32(len(name_raw) // 2)
+    w.raw(name_raw)
+    w.raw(m.data)
+
+
+def _write_image(w: Writer, img: MfaImage) -> None:
+    payload = img.payload
+    if not payload:
+        import zlib
+        payload = zlib.compress(img.pixels, 9)
+    w.u32(img.handle)
+    w.i32(img.checksum)
+    w.u32(img.references)
+    w.u32(len(payload) + 4)
+    w.u16(img.width)
+    w.u16(img.height)
+    w.raw(bytes([img.graphic_mode & 0xFF, img.flags & 0xFF]))
+    w.u16(0)
+    for v in (img.hotspot_x, img.hotspot_y, img.action_x, img.action_y):
+        w.raw(struct.pack("<h", v))
+    w.raw(img.transparent)
+    w.u32(img.decl_size if img.decl_size else len(img.pixels))
+    w.raw(payload)
+
+
+def _write_image_bank(w: Writer, h: ImageBankHeader, tag: bytes) -> None:
+    w.raw(tag)
+    w.u32(h.graphic_mode)
+    w.u16(h.palette_version)
+    w.u16(h.palette_entries if h.palette_entries else len(h.palette))
+    for color in h.palette:
+        w.raw(color)
+    w.u32(len(h.entries))
+    for img in h.entries:
+        _write_image(w, img)
+
+
+def build_banks(b: MfaBanks) -> bytes:
+    """把五个库写回字节流；``build_banks(read_banks(buf, s)) == buf[s:b.app_offset]``。"""
+    w = Writer()
+    w.raw(TAG_FONTS)
+    w.u32(len(b.fonts))
+    for f in b.fonts:
+        _write_font(w, f)
+
+    w.raw(TAG_SOUNDS)
+    w.u32(len(b.sounds))
+    for s in b.sounds:
+        _write_sound(w, s)
+
+    w.raw(TAG_MUSIC)
+    w.u32(len(b.music))
+    for m in b.music:
+        _write_music(w, m)
+
+    if b.icons:
+        _write_image_bank(w, b.icons, TAG_ICONS)
+    if b.images:
+        _write_image_bank(w, b.images, TAG_IMAGES)
+    return w.getvalue()

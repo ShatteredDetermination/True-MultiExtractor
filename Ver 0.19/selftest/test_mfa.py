@@ -159,8 +159,10 @@ def test_banks():
               banks.icons.palette_entries)
         check(banks.icons.count > 0, f"{tag} 图标数 {banks.icons.count}")
         check(banks.images.count > 0, f"{tag} 图像数 {banks.images.count}")
-        check(len(banks.icons.raw_tail) > 0, f"{tag} 图标条目原样保留",
-              f"{len(banks.icons.raw_tail)} B")
+        check(len(banks.icons.entries) == banks.icons.count,
+              f"{tag} 图标条目全解析（{banks.icons.count} 条）")
+        check(len(banks.images.entries) == banks.images.count,
+              f"{tag} 图像条目全解析（{banks.images.count} 条）")
 
         for f in banks.fonts:
             check(f.name != "", f"{tag} 字体名 {f.name!r}")
@@ -193,6 +195,49 @@ def test_banks():
         check(True, "音频库标记坏掉要报错")
 
 
+def test_write_banks():
+    """库的写入：读出来的东西原样写回去，必须和盘上的字节一模一样。"""
+    section("5. 库的写入（前段 + 五个库 逐字节重建）")
+    present = [p for p in SAMPLES if p.exists()]
+    if not present:
+        global SKIPPED
+        SKIPPED += 1
+        print("  [skip] 参考 MFA 样本不在本机")
+        return
+
+    for path in present:
+        raw = path.read_bytes()
+        pre, banks = mfa.read_project_prefix(raw)
+        rebuilt = mfa.build_project_prefix(pre, banks)
+        orig = raw[:banks.app_offset]
+        check(rebuilt == orig, f"{path.name} 前 {banks.app_offset:,} B 逐字节重建",
+              f"{len(rebuilt)} vs {len(orig)}")
+
+        # 图像条目：尺寸 / 通道 / 压缩前后长度都对得上
+        if banks.images and banks.images.entries:
+            img = banks.images.entries[0]
+            check(img.width > 0 and img.height > 0, f"{path.name} 图像尺寸 {img.width}x{img.height}")
+            check(img.channels in (1, 2, 3, 4), f"{path.name} 通道数 {img.channels}",
+                  img.channels)
+            check(len(img.payload) == img.data_size - 4, f"{path.name} 压缩长度自洽")
+            check(len(img.pixels) == img.decl_size, f"{path.name} 解压长度自洽")
+
+        # 库计数与条目数一致
+        if banks.icons:
+            check(len(banks.icons.entries) == banks.icons.count,
+                  f"{path.name} 图标条目数 = 头里的 {banks.icons.count}")
+        if banks.images:
+            check(len(banks.images.entries) == banks.images.count,
+                  f"{path.name} 图像条目数 = 头里的 {banks.images.count}")
+
+    # Template 的 #5 有多余字节（50x50 却多 100 字节），必须如实记下来而不是当解析失败
+    tpl = SAMPLES[0]
+    if tpl.exists():
+        _, banks = mfa.read_project_prefix(tpl.read_bytes())
+        slack = [(i, e.slack) for i, e in enumerate(banks.images.entries) if e.slack]
+        check(slack == [(5, 100)], "Template 图像 #5 的 +100 B 记为 slack", str(slack))
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -201,6 +246,7 @@ def main() -> int:
     test_synthetic()
     test_samples()
     test_banks()
+    test_write_banks()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")
