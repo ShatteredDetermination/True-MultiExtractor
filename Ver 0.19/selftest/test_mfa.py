@@ -353,6 +353,135 @@ def test_menu():
               f"{p.name} 菜单区结束偏移 0x{end:X}")
 
 
+def test_globals():
+    section("9. 全局量区 + 帧偏移表")
+    g = mfa.MfaGlobals(graphic_mode=4, icon_handles=[0, 1, 2],
+                       frame_offsets=[24, 32], return_offset=40)
+    check(mfa.read_globals(mfa.build_globals(g), 0)[0] == g, "合成全局量区回环")
+    check(mfa.build_globals(mfa.read_globals(mfa.build_globals(g), 0)[0])
+          == mfa.build_globals(g), "合成全局量区二次回写一致")
+    for bad, what in ((mfa.MfaGlobals(values=[("a", 1)]), "全局值非空要报错"),
+                      (mfa.MfaGlobals(strings=[("a", "b")]), "全局字符串非空要报错")):
+        try:
+            mfa.build_globals(bad)
+            check(False, what)
+        except mfa.MfaError:
+            check(True, what)
+    # 越界在读的时候拦：写侧不校验偏移，读侧必须挡住
+    try:
+        mfa.read_globals(
+            mfa.build_globals(mfa.MfaGlobals(frame_offsets=[999999],
+                                             return_offset=8)), 0)
+        check(False, "帧偏移越界要报错")
+    except mfa.MfaError:
+        check(True, "帧偏移越界要报错")
+
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    want = {  # 文件名 → (帧偏移, 回程偏移)
+        "Template.mfa": (0x2E957, 0x2EEC2),
+        "Platformer Engine.mfa": (0x5C88D, 0x66E57),
+    }
+    for p in present:
+        raw = p.read_bytes()
+        lay = mfa.read_layout(raw)
+        _, menu_end = mfa.read_menu_region(raw, lay.tail_offset)
+        g, end = mfa.read_globals(raw, menu_end)
+        want_off, want_ret = want.get(p.name, (0, 0))
+        check(g.graphic_mode == lay.banks.images.graphic_mode,
+              f"{p.name} 图形模式 {g.graphic_mode} 与图像库一致")
+        check(not g.values and not g.strings and not g.events_raw,
+              f"{p.name} 全局值/字符串/事件都为空")
+        check(g.icon_handles == list(range(9)), f"{p.name} 图标句柄 0~8",
+              f"{g.icon_handles}")
+        check(g.icon_handles[-1] < lay.banks.icons.count,
+              f"{p.name} 句柄落在图标库 {lay.banks.icons.count} 条之内")
+        check(g.frame_offsets == [want_off],
+              f"{p.name} 帧偏移 {hex(want_off)}", f"{[hex(o) for o in g.frame_offsets]}")
+        check(g.return_offset == want_ret,
+              f"{p.name} 回程偏移 {hex(want_ret)}", hex(g.return_offset))
+        check(mfa.build_globals(g) == raw[menu_end:end],
+              f"{p.name} 全局量区逐字节回写（{end - menu_end} B）")
+        check(end == g.frame_offsets[0], f"{p.name} 段尾正好是第一帧起点")
+        check(raw[g.frame_offsets[0]:g.frame_offsets[0] + 4] == b"\x00" * 4,
+              f"{p.name} 第一帧前 4 字节为 0（两份样本一致）")
+
+
+def test_chunks():
+    section("10. 对象 chunk 列表")
+    cl = mfa.MfaChunkList(chunks=[mfa.MfaChunk(chunk_id=0x30, size=4,
+                                               data=b"\x01\x00\x00\x00")],
+                          terminated=True)
+    buf = mfa.build_chunk_list(cl)
+    check(buf == b"\x30\x04\x00\x00\x00\x01\x00\x00\x00\x00", "合成 chunk 列表字节")
+    got = mfa.read_chunk_list(buf, 0)
+    check([(c.chunk_id, c.data) for c in got.chunks]
+          == [(0x30, b"\x01\x00\x00\x00")], "合成 chunk 列表回环")
+    check(mfa.build_chunk_list(got) == buf, "合成 chunk 列表逐字节回写")
+    check(got.terminated and got.end == len(buf), "收尾字节只占一字节")
+    for bad, what in ((b"\x30\x99\x00\x00\x00", "长度越界要报错"),
+                      (b"\x30\x04", "长度字段越界要报错")):
+        try:
+            mfa.read_chunk_list(bad, 0)
+            check(False, what)
+        except mfa.MfaError:
+            check(True, what)
+
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    seqs = {}
+    for p in present:
+        raw = p.read_bytes()
+        lay = mfa.read_layout(raw)
+        _, me = mfa.read_menu_region(raw, lay.tail_offset)
+        g, _ = mfa.read_globals(raw, me)
+        cl = mfa.read_chunk_list(raw, g.return_offset)
+        seqs[p.name] = [c.chunk_id for c in cl.chunks]
+        check(len(cl.chunks) == 47, f"{p.name} 47 条 chunk",
+              f"{len(cl.chunks)}")
+        check(cl.chunks[0].chunk_id == 0x30 and cl.chunks[0].size == 4,
+              f"{p.name} 首条是 0x30 / 4 B")
+        check(cl.terminated, f"{p.name} 收尾字节在 0x{cl.end - 1:X}")
+        check(cl.end == len(raw), f"{p.name} chunk 列表正好收到文件尾",
+              f"0x{cl.end:X} vs 0x{len(raw):X}")
+        check(mfa.build_chunk_list(cl) == raw[g.return_offset:cl.end],
+              f"{p.name} chunk 列表逐字节回写")
+    if len(seqs) == 2:
+        a, b = list(seqs.values())
+        check(a == b, "两份样本 chunk id 序列一致")
+
+
+def test_project():
+    section("11. 整份工程重建")
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    for p in present:
+        raw = p.read_bytes()
+        pr = mfa.read_project(raw)
+        check(mfa.build_project(pr) == raw,
+              f"{p.name} 整份 MFA 逐字节重建（{len(raw)} B）",
+              f"{len(mfa.build_project(pr))} vs {len(raw)}")
+        check(pr.size == len(raw), f"{p.name} 记录长度等于文件长度")
+        check(pr.globals.return_offset > pr.globals.frame_offsets[0],
+              f"{p.name} 帧体 {pr.frame_bytes} B 落在帧区之内")
+        check(len(pr.chunks.chunks) == 47, f"{p.name} 47 条对象 chunk")
+        check("chunk" in mfa.describe_project(pr), f"{p.name} 概况串")
+        # 段首尾相接：前段+库+菜单+全局量之后就是第一帧
+        head = (mfa.build_project_prefix(pr.layout.preamble, pr.layout.banks)
+                + mfa.build_app_header(pr.layout.app)
+                + mfa.build_menu_region(pr.menu) + mfa.build_globals(pr.globals))
+        check(len(head) == pr.globals.frame_offsets[0],
+              f"{p.name} 头三段长度 {len(head)} 正好等于帧偏移",
+              f"{len(head)} vs {pr.globals.frame_offsets[0]}")
+        check(head == raw[:len(head)], f"{p.name} 头三段逐字节一致")
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -365,6 +494,9 @@ def main() -> int:
     test_app_header()
     test_layout()
     test_menu()
+    test_globals()
+    test_chunks()
+    test_project()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")

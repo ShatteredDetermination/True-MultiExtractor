@@ -926,3 +926,231 @@ def build_menu_region(m: MfaMenuRegion) -> bytes:
 def describe_menu(m: MfaMenuRegion) -> str:
     return (f"菜单块 {m.menu_size} B 窗口菜单 #{m.window_menu} "
             f"菜单图形 {len(m.menu_images)} 项")
+
+
+# ------------------------------------------------------------ 全局量 / 图形模式 / 图标
+# 菜单区之后到帧偏移表之前，按实测顺序（两份样本逐字节一样，且首尾都对得上）：
+#
+#     u32 全局值条数 + 条目            （非空条目的字段布局还没有样本，先只支持空）
+#     u32 全局字符串条数 + 条目        （同上）
+#     u32 全局事件字节数 + 事件数据
+#     u32 图形模式                     （与图像库头里的 graphicMode 一致）
+#     u32 图标句柄数 + 每条 i32 句柄
+#     u32 限定符条数 + 条目            （先只支持空）
+#     u32 扩展条数 + 条目              （先只支持空）
+#     u32 帧数 + 每帧绝对偏移 + i32 回程偏移
+#
+# 「先只支持空」不是偷懒：这两份样本里全是 0，硬猜非空布局等于编数据。
+# 真项目里遇到非空就抛 MfaError，把「这里还没落地」摆在明面上。
+
+@dataclass
+class MfaGlobals:
+    values: List[tuple] = None        # (名字, 值)，非空布局未观测
+    strings: List[tuple] = None       # (名字, 值)，非空布局未观测
+    events_raw: bytes = b""           # 全局事件段原样（事件树还没拆）
+    graphic_mode: int = 0
+    icon_handles: List[int] = None
+    qualifiers_raw: bytes = b""
+    extensions_raw: bytes = b""
+    frame_offsets: List[int] = None
+    return_offset: int = 0            # 帧之后的回程偏移（对象 chunk 列表起点）
+
+    def __post_init__(self):
+        self.values = self.values if self.values is not None else []
+        self.strings = self.strings if self.strings is not None else []
+        self.icon_handles = self.icon_handles if self.icon_handles is not None else []
+        self.frame_offsets = (self.frame_offsets
+                              if self.frame_offsets is not None else [])
+
+
+def _read_named_list(r: Reader, what: str) -> List[tuple]:
+    n = r.u32()
+    if n:
+        raise MfaError(f"{what}有 {n} 条，但非空条目的布局还没观测到样本")
+    return []
+
+
+def read_globals(buf: bytes, pos: int):
+    """读全局量区 + 帧偏移表，返回 (MfaGlobals, 段后偏移 = 第一帧起点)。"""
+    r = Reader(buf, pos)
+    g = MfaGlobals()
+    g.values = _read_named_list(r, "全局值")
+    g.strings = _read_named_list(r, "全局字符串")
+    n = r.u32()
+    if n > len(buf) - r.pos:
+        raise MfaError(f"全局事件段 {n} B 越界 @0x{r.pos - 4:X}")
+    g.events_raw = r.take(n)
+    g.graphic_mode = r.u32()
+    icons = r.u32()
+    if icons > 4096:
+        raise MfaError(f"图标句柄数异常 {icons}")
+    g.icon_handles = [r.i32() for _ in range(icons)]
+    n = r.u32()
+    if n:
+        raise MfaError(f"限定符有 {n} 条，布局还没观测到样本")
+    n = r.u32()
+    if n:
+        raise MfaError(f"扩展有 {n} 条，布局还没观测到样本")
+    n = r.u32()
+    if n > 4096:
+        raise MfaError(f"帧数异常 {n}")
+    for _ in range(n):
+        off = r.i32()
+        if not (0 < off < len(buf)):
+            raise MfaError(f"帧偏移 {off} 越界")
+        g.frame_offsets.append(off)
+    g.return_offset = r.i32()
+    if not (0 < g.return_offset <= len(buf)):
+        raise MfaError(f"回程偏移 {g.return_offset} 越界")
+    return g, r.pos
+
+
+def build_globals(g: MfaGlobals) -> bytes:
+    w = Writer()
+    for items, what in ((g.values, "全局值"), (g.strings, "全局字符串")):
+        if items:
+            raise MfaError(f"{what}非空条目的布局还没落地，写不出来")
+        w.u32(0)
+    w.u32(len(g.events_raw))
+    w.raw(g.events_raw)
+    w.u32(g.graphic_mode)
+    w.u32(len(g.icon_handles))
+    for h in g.icon_handles:
+        w.i32(h)
+    w.u32(0)          # 限定符
+    w.u32(0)          # 扩展
+    w.u32(len(g.frame_offsets))
+    for off in g.frame_offsets:
+        w.i32(off)
+    w.i32(g.return_offset)
+    return w.getvalue()
+
+
+def describe_globals(g: MfaGlobals) -> str:
+    return (f"全局值 {len(g.values)} / 全局字符串 {len(g.strings)} / "
+            f"全局事件 {len(g.events_raw)} B / 图形模式 {g.graphic_mode} / "
+            f"图标句柄 {len(g.icon_handles)} / 帧 {len(g.frame_offsets)} "
+            f"{[hex(o) for o in g.frame_offsets]} / 回程 {g.return_offset:#x}")
+
+
+# ---------------------------------------------------------------- 对象 chunk 列表
+# 帧之后（回程偏移处）是整份工程的对象 chunk 列表，一条接一条：
+#
+#     u8 chunk_id + i32 size + size 字节数据
+#
+# 收尾是**一个字节的 0**（不是「0 + 长度」）。实测两份样本各 47 条、id 序列完全
+# 一样、走到最后一个 0x00 正好落在文件尾 —— 这条链子错了就对不上 EOF。
+
+@dataclass
+class MfaChunk:
+    chunk_id: int = 0
+    size: int = 0
+    data: bytes = b""
+
+
+@dataclass
+class MfaChunkList:
+    chunks: List[MfaChunk] = None
+    end: int = 0
+    terminated: bool = False     # 是否遇到那一个字节的 0 收尾
+
+    def __post_init__(self):
+        self.chunks = self.chunks if self.chunks is not None else []
+
+
+def read_chunk_list(buf: bytes, pos: int) -> MfaChunkList:
+    """从回程偏移处读对象 chunk 列表，按收尾字节判断结束。"""
+    cl = MfaChunkList()
+    q = pos
+    while True:
+        if q >= len(buf):
+            raise MfaError(f"chunk 列表在 0x{q:X} 处没读到收尾")
+        cid = buf[q]
+        q += 1
+        if cid == 0:
+            cl.terminated = True
+            cl.end = q
+            return cl
+        if q + 4 > len(buf):
+            raise MfaError(f"chunk 0x{cid:02X} 的长度字段越界 @0x{q - 1:X}")
+        size = struct.unpack_from("<i", buf, q)[0]
+        q += 4
+        if size < 0 or q + size > len(buf):
+            raise MfaError(f"chunk 0x{cid:02X} 长度 {size} 越界 @0x{q - 5:X}")
+        cl.chunks.append(MfaChunk(chunk_id=cid, size=size, data=buf[q:q + size]))
+        q += size
+        if len(cl.chunks) > 4096:
+            raise MfaError(f"chunk 列表在 0x{pos:X} 起超过 4096 条，不像真的")
+
+
+def build_chunk_list(cl: MfaChunkList) -> bytes:
+    w = Writer()
+    for c in cl.chunks:
+        w.raw(bytes([c.chunk_id]))
+        w.i32(c.size if c.size else len(c.data))
+        w.raw(c.data)
+    w.raw(b"\x00")          # 收尾就这一个字节
+    return w.getvalue()
+
+
+def describe_chunk_list(cl: MfaChunkList) -> str:
+    ids = " ".join(f"{c.chunk_id:02X}" for c in cl.chunks)
+    return (f"{len(cl.chunks)} 条 chunk，收尾 {'有' if cl.terminated else '无'}，"
+            f"到 0x{cl.end:X}：{ids}")
+
+
+# ---------------------------------------------------------------- 整份工程（读）
+# 到这里所有段都能定位了，只剩帧体（每帧的 MFAFrameInfo：对象、图层、事件、
+# 虚拟矩形）还没拆字段 —— 所以帧体按原字节保留，其余全部结构化。
+# 有了它才有资格说「整份 MFA 能逐字节重建」：段与段首尾相接、chunk 列表收到 EOF。
+
+@dataclass
+class MfaProject:
+    layout: MfaLayout = None
+    menu: MfaMenuRegion = None
+    globals: MfaGlobals = None
+    frames_raw: bytes = b""          # 帧体原样（各帧首尾相接的那一段）
+    chunks: MfaChunkList = None
+    size: int = 0
+
+    @property
+    def frame_bytes(self) -> int:
+        return len(self.frames_raw)
+
+
+def read_project(buf: bytes) -> MfaProject:
+    """读一份完整 MFA：前段、库、应用设置、菜单、全局量、帧体、chunk 列表。"""
+    lay = read_layout(buf)
+    menu, pos = read_menu_region(buf, lay.tail_offset)
+    glob, pos = read_globals(buf, pos)
+    frames_start = glob.frame_offsets[0] if glob.frame_offsets else pos
+    if frames_start != pos:
+        raise MfaError(f"帧起点 0x{frames_start:X} 与全局量段尾 0x{pos:X} 不接")
+    if glob.return_offset < frames_start:
+        raise MfaError(f"回程偏移 0x{glob.return_offset:X} 落在帧区之前")
+    chunks = read_chunk_list(buf, glob.return_offset)
+    if chunks.end != len(buf):
+        raise MfaError(f"chunk 列表收到 0x{chunks.end:X}，文件尾 0x{len(buf):X}")
+    pr = MfaProject(layout=lay, menu=menu, globals=glob,
+                    frames_raw=buf[frames_start:glob.return_offset],
+                    chunks=chunks, size=len(buf))
+    return pr
+
+
+def build_project(pr: MfaProject) -> bytes:
+    """把 MfaProject 写回字节流（帧体原样带上）。"""
+    return (build_project_prefix(pr.layout.preamble, pr.layout.banks)
+            + build_app_header(pr.layout.app)
+            + build_menu_region(pr.menu)
+            + build_globals(pr.globals)
+            + pr.frames_raw
+            + build_chunk_list(pr.chunks))
+
+
+def describe_project(pr: MfaProject) -> str:
+    return (f"{pr.layout.preamble.app_name!r} {pr.size} B："
+            f"缩略图 {len(pr.layout.preamble.thumbnail)} B / "
+            f"{describe_banks(pr.layout.banks)} / "
+            f"菜单 {pr.menu.menu_size} B / "
+            f"帧 {len(pr.globals.frame_offsets)} 个（原样 {pr.frame_bytes} B）/ "
+            f"chunk {len(pr.chunks.chunks)} 条")
