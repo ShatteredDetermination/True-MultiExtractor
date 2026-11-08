@@ -1,0 +1,8 @@
+{
+  "latest_stable": "0.18R",
+  "latest_beta": "",
+  "download_url": "https://github.com/ShatteredDetermination/True-MultiExtractor/releases/download/v0.18R/UpdatePack.zip",
+  "sha256": "1ba49d2f9711753b1e648ce89fc40cb31f613e51be42841dc1c386aca34ebd3d",
+  "changelog": "0.18R：Slim 微内核，包内不含那 178 MB 外部工具，缺什么自己下；工具清单三级来源（远端 / 本地缓存 / 内置兜底）+ 镜像回退；壳与 CLI 同级分发，操作区下面五颗软键；操作进度按百分比显示、进度条与下载进度绑定；日志带时间戳；UpdatePack.zip 根层平铺，在线更新能直接覆盖安装。",
+  "_note": "更新器只比较主版本号，E / Rc / S 后缀在比较时被剥离；sha256 是 download_url 那个文件的。UpdatePack.zip 的条目在根层平铺，daemon.bat 用 tar -xf 直接解到程序根；带子目录的发布包（MultiExtractor-<版本>-win64.zip）不能当更新包用。"
+}
