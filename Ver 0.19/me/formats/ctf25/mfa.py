@@ -1109,9 +1109,13 @@ class MfaProject:
     layout: MfaLayout = None
     menu: MfaMenuRegion = None
     globals: MfaGlobals = None
+    frames: List[MfaFrame] = None
     frames_raw: bytes = b""          # 帧体原样（各帧首尾相接的那一段）
     chunks: MfaChunkList = None
     size: int = 0
+
+    def __post_init__(self):
+        self.frames = self.frames if self.frames is not None else []
 
     @property
     def frame_bytes(self) -> int:
@@ -1119,7 +1123,7 @@ class MfaProject:
 
 
 def read_project(buf: bytes) -> MfaProject:
-    """读一份完整 MFA：前段、库、应用设置、菜单、全局量、帧体、chunk 列表。"""
+    """读一份完整 MFA：前段、库、应用设置、菜单、全局量、帧、chunk 列表。"""
     lay = read_layout(buf)
     menu, pos = read_menu_region(buf, lay.tail_offset)
     glob, pos = read_globals(buf, pos)
@@ -1131,19 +1135,26 @@ def read_project(buf: bytes) -> MfaProject:
     chunks = read_chunk_list(buf, glob.return_offset)
     if chunks.end != len(buf):
         raise MfaError(f"chunk 列表收到 0x{chunks.end:X}，文件尾 0x{len(buf):X}")
-    pr = MfaProject(layout=lay, menu=menu, globals=glob,
+    frames = []
+    for i, start in enumerate(glob.frame_offsets):
+        end = (glob.frame_offsets[i + 1] if i + 1 < len(glob.frame_offsets)
+               else glob.return_offset)
+        if end <= start:
+            raise MfaError(f"第 {i + 1} 帧的边界不成立 0x{start:X}~0x{end:X}")
+        frames.append(read_frame(buf, start, end))
+    pr = MfaProject(layout=lay, menu=menu, globals=glob, frames=frames,
                     frames_raw=buf[frames_start:glob.return_offset],
                     chunks=chunks, size=len(buf))
     return pr
 
 
 def build_project(pr: MfaProject) -> bytes:
-    """把 MfaProject 写回字节流（帧体原样带上）。"""
+    """把 MfaProject 写回字节流（每帧的图层之后仍是原字节）。"""
     return (build_project_prefix(pr.layout.preamble, pr.layout.banks)
             + build_app_header(pr.layout.app)
             + build_menu_region(pr.menu)
             + build_globals(pr.globals)
-            + pr.frames_raw
+            + b"".join(build_frame(f) for f in pr.frames)
             + build_chunk_list(pr.chunks))
 
 
@@ -1152,5 +1163,104 @@ def describe_project(pr: MfaProject) -> str:
             f"缩略图 {len(pr.layout.preamble.thumbnail)} B / "
             f"{describe_banks(pr.layout.banks)} / "
             f"菜单 {pr.menu.menu_size} B / "
-            f"帧 {len(pr.globals.frame_offsets)} 个（原样 {pr.frame_bytes} B）/ "
+            f"帧 {len(pr.globals.frame_offsets)} 个："
+            f"{' / '.join(f.name for f in pr.frames)!r} "
+            f"（头部已拆，其余 {sum(len(f.rest_raw) for f in pr.frames)} B 原样）/ "
             f"chunk {len(pr.chunks.chunks)} 条")
+
+
+# -------------------------------------------------------------------- 帧（头部）
+# 每帧的开头按 CTFAK Frame.Write 的顺序，与两份样本逐字段对得上：
+#
+#     i32 句柄 / CString 帧名 / i32 宽 / i32 高 / 4 B 背景色 / u32 帧 flags
+#     i32 最大对象数 / CString 密码 / CString 未知串（实测 12 字节的二进制样内容）
+#     i32 最后查看 X/Y（两份样本正好是画面中心）
+#     u32 调色板条数 + 每条 4 B（两份都是 256）
+#     i32 图章句柄 / i32 当前图层
+#     ... 图层 / 转场 / 对象 / 文件夹 / 实例 / 事件 / 帧内 chunk 列表（还没拆）
+#
+# 这一段之后整帧剩余部分按原字节保留 —— 帧内对象与事件树是 CCN → MFA 真正要
+# **重建**的东西，先别拿原始字节冒充「已解析」。
+
+@dataclass
+class MfaFrame:
+    handle: int = 0
+    name: str = ""
+    width: int = 0
+    height: int = 0
+    background: bytes = b"\x00\x00\x00\x00"
+    flags: int = 0
+    max_objects: int = 0
+    password: str = ""
+    unk_string: bytes = b""
+    last_x: int = 0
+    last_y: int = 0
+    palette: List[bytes] = None
+    stamp_handle: int = 0
+    active_layer: int = 0
+    rest_raw: bytes = b""        # 图层及其后（对象/实例/事件/帧内 chunk）原样
+
+    def __post_init__(self):
+        self.palette = self.palette if self.palette is not None else []
+
+
+def read_frame(buf: bytes, start: int, end: int) -> MfaFrame:
+    """读一帧的头部（到当前图层为止），其余按原字节挂 ``rest_raw``。"""
+    f = MfaFrame()
+    r = Reader(buf, start)
+    f.handle = r.i32()
+    f.name = r.cstring()
+    f.width = r.i32()
+    f.height = r.i32()
+    f.background = r.take(4)
+    f.flags = r.u32()
+    f.max_objects = r.i32()
+    f.password = r.cstring()
+    n = r.u32()
+    if n > 512:
+        raise MfaError(f"帧 {f.name!r} 的未知串长度 {n} 异常")
+    f.unk_string = r.take(n)
+    f.last_x = r.i32()
+    f.last_y = r.i32()
+    n = r.u32()
+    if n > 4096:
+        raise MfaError(f"帧 {f.name!r} 的调色板条数 {n} 异常")
+    for _ in range(n):
+        f.palette.append(r.take(4))
+    f.stamp_handle = r.i32()
+    f.active_layer = r.i32()
+    if not (0 <= f.width <= 65535 and 0 <= f.height <= 65535):
+        raise MfaError(f"帧 {f.name!r} 尺寸异常 {f.width}x{f.height}")
+    if r.pos > end:
+        raise MfaError(f"帧 {f.name!r} 头部越过帧尾 0x{end:X}")
+    f.rest_raw = buf[r.pos:end]
+    return f
+
+
+def build_frame(f: MfaFrame) -> bytes:
+    w = Writer()
+    w.i32(f.handle)
+    w.cstring(f.name)
+    w.i32(f.width)
+    w.i32(f.height)
+    w.raw(f.background)
+    w.u32(f.flags)
+    w.i32(f.max_objects)
+    w.cstring(f.password)
+    w.u32(len(f.unk_string))
+    w.raw(f.unk_string)
+    w.i32(f.last_x)
+    w.i32(f.last_y)
+    w.u32(len(f.palette))
+    for c in f.palette:
+        w.raw(c)
+    w.i32(f.stamp_handle)
+    w.i32(f.active_layer)
+    w.raw(f.rest_raw)
+    return w.getvalue()
+
+
+def describe_frame(f: MfaFrame) -> str:
+    return (f"帧 {f.name!r} {f.width}x{f.height} 背景 {f.background.hex(' ')} "
+            f"flags {f.flags:#x} 调色板 {len(f.palette)} 色 图章 {f.stamp_handle} "
+            f"当前层 {f.active_layer} 其余 {len(f.rest_raw)} B 原样")

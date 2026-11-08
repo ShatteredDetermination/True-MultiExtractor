@@ -482,6 +482,56 @@ def test_project():
         check(head == raw[:len(head)], f"{p.name} 头三段逐字节一致")
 
 
+def test_frames():
+    section("12. 帧头部")
+    try:
+        mfa.read_frame(b"\x00\x00\x00", 0, 3)
+        check(False, "帧头截断要报错")
+    except mfa.MfaError:
+        check(True, "帧头截断要报错")
+    f = mfa.MfaFrame(handle=3, name="帧 1", width=320, height=240,
+                     background=b"\x01\x02\x03\x00", flags=0x104,
+                     max_objects=1000, password="", unk_string=b"\x01\x02",
+                     last_x=160, last_y=120,
+                     palette=[b"\x00" * 4] * 256, stamp_handle=2,
+                     active_layer=1, rest_raw=b"\xAA\xBB")
+    reb = mfa.read_frame(mfa.build_frame(f), 0, len(mfa.build_frame(f)))
+    check(reb == f, "合成帧头回环（含中文帧名 / 256 色调色板）")
+    check(mfa.build_frame(reb) == mfa.build_frame(f), "合成帧头逐字节回写")
+
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    want = {
+        "Template.mfa": ("Frame 1", 640, 360, b"\xc0\xc0\xc0\x00", 320, 180, 12),
+        "Platformer Engine.mfa": ("Level", 1280, 360, b"\x20\x20\x20\x00",
+                                  342, 219, 14),
+    }
+    for p in present:
+        raw = p.read_bytes()
+        pr = mfa.read_project(raw)
+        f = pr.frames[0]
+        name, w, h, bg, lx, ly, stamp = want.get(
+            p.name, ("", 0, 0, b"\x00" * 4, 0, 0, 0))
+        check(f.name == name, f"{p.name} 帧名 {name!r}", repr(f.name))
+        check((f.width, f.height) == (w, h), f"{p.name} 帧尺寸 {w}x{h}",
+              f"{f.width}x{f.height}")
+        check(f.background == bg, f"{p.name} 背景色 {bg.hex(' ')}")
+        check((f.last_x, f.last_y) == (lx, ly),
+              f"{p.name} 最后查看 {lx},{ly}", f"{f.last_x},{f.last_y}")
+        check(len(f.palette) == 256, f"{p.name} 调色板 256 色",
+              f"{len(f.palette)}")
+        check(f.stamp_handle == stamp, f"{p.name} 图章句柄 {stamp}",
+              f"{f.stamp_handle}")
+        check(f.flags == 0x104, f"{p.name} 帧 flags 0x104", hex(f.flags))
+        check(f.max_objects == 1000, f"{p.name} 最大对象 1000")
+        check(mfa.build_frame(f) ==
+              raw[pr.globals.frame_offsets[0]:pr.globals.return_offset],
+              f"{p.name} 帧逐字节回写（{len(mfa.build_frame(f))} B）")
+        check("帧" in mfa.describe_frame(f), f"{p.name} 帧概况串")
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -497,6 +547,7 @@ def main() -> int:
     test_globals()
     test_chunks()
     test_project()
+    test_frames()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")
