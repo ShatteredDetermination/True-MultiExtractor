@@ -285,6 +285,41 @@ def test_app_header():
         check(True, "窗口尺寸荒唐要报错")
 
 
+def test_layout():
+    section("7. 整份工程进度尺")
+    want = {  # 样本 → (已解析占比下限, 上限)
+        "Template.mfa": (98.0, 98.2),
+        "Platformer Engine.mfa": (89.3, 89.5),
+    }
+    try:
+        mfa.read_layout(b"")
+        check(False, "空文件要报错")
+    except mfa.MfaError:
+        check(True, "空文件要报错")
+
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    for p in present:
+        raw = p.read_bytes()
+        lay = mfa.read_layout(raw)
+        check(lay.file_size == len(raw), f"{p.name} 文件长度 {len(raw)} B")
+        check(lay.banks_offset > 0 and lay.banks_offset < lay.app_offset
+              < lay.tail_offset <= lay.file_size,
+              f"{p.name} 段偏移递增（库 0x{lay.banks_offset:X} < "
+              f"应用 0x{lay.app_offset:X} < 尾巴 0x{lay.tail_offset:X}）")
+        check(mfa.build_project_prefix(lay.preamble, lay.banks)
+              == raw[:lay.app_offset], f"{p.name} 前段 + 库逐字节回写")
+        check(mfa.build_app_header(lay.app)
+              == raw[lay.app_offset:lay.tail_offset],
+              f"{p.name} 应用设置段逐字节回写（{lay.tail_size} B 尾巴未解析）")
+        lo, hi = want.get(p.name, (0.0, 100.0))
+        check(lo <= lay.coverage <= hi,
+              f"{p.name} 已解析占比 {lay.coverage:.1f}%", f"期望 {lo}~{hi}")
+        check("尾巴" in mfa.describe_layout(lay), f"{p.name} 概况串")
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -295,6 +330,7 @@ def main() -> int:
     test_banks()
     test_write_banks()
     test_app_header()
+    test_layout()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")

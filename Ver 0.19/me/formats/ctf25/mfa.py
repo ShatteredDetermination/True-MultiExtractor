@@ -812,3 +812,61 @@ def build_project_prefix(pre: "MfaPreamble", banks: MfaBanks) -> bytes:
 def describe_app(h: MfaAppHeader) -> str:
     return (f"{h.app_name!r} 作者 {h.author!r} {h.width}x{h.height} "
             f"帧率 {h.frame_rate} 玩家 {len(h.players)}")
+
+
+# ---------------------------------------------------------------- 整份工程进度尺
+# 应用设置段之后（菜单栏 → 菜单图形 → 全局值/全局字符串 → 全局事件 → 图形模式
+# → 限定符 → 扩展 → 帧偏移表 → 帧 → 对象块清单）还在逐个段落落地中。
+# read_layout 把这之前的四段串起来，用 tail_size / coverage 报「还剩多少没解析」，
+# 既是自测断言点，也是后面写 CCN → MFA 时的填坑清单。
+
+@dataclass
+class MfaLayout:
+    preamble: MfaPreamble
+    banks: MfaBanks
+    app: MfaAppHeader
+    banks_offset: int        # 'ATNF' 起始偏移
+    app_offset: int          # 应用设置段起始偏移
+    tail_offset: int         # 还没解析的尾巴起始偏移（= 应用设置段结束）
+    file_size: int
+
+    @property
+    def tail_size(self) -> int:
+        return self.file_size - self.tail_offset
+
+    @property
+    def coverage(self) -> float:
+        """已落地段占比（0~100）。"""
+        if not self.file_size:
+            return 0.0
+        return self.tail_offset * 100.0 / self.file_size
+
+
+def read_layout(buf: bytes) -> MfaLayout:
+    """读前段 + 五个库 + 应用设置段，返回 ``MfaLayout``。"""
+    if not buf:
+        raise MfaError("空文件")
+    pre = read_preamble(buf)
+    banks_offset = len(buf) - len(pre.banks_raw)
+    banks = read_banks(buf, banks_offset)
+    app, app_end = read_app_header(buf, banks.app_offset)
+    if app_end > len(buf):
+        raise MfaError(f"应用设置段越过文件尾 0x{app_end:X} > 0x{len(buf):X}")
+    return MfaLayout(
+        preamble=pre,
+        banks=banks,
+        app=app,
+        banks_offset=banks_offset,
+        app_offset=banks.app_offset,
+        tail_offset=app_end,
+        file_size=len(buf),
+    )
+
+
+def describe_layout(lay: MfaLayout) -> str:
+    return (f"{lay.preamble.app_name!r} "
+            f"{len(lay.preamble.thumbnail)} B 缩略图 "
+            f"库@{lay.banks_offset:#x}({describe_banks(lay.banks)}) "
+            f"应用设置@{lay.app_offset:#x}({lay.app.width}x{lay.app.height}) "
+            f"已解析 {lay.tail_offset:#x}/{lay.file_size:#x}"
+            f"({lay.coverage:.1f}%) 尾巴 {lay.tail_size} B")
