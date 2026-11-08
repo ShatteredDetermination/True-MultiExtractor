@@ -71,6 +71,10 @@ def _build_parser() -> "_Parser":
     ap.add_argument("--rebuild", action="store_true",
                     help="全量重建：按语义模型重新排布整份文件（不等长）")
     ap.add_argument("--detect", action="store_true", help="只识别引擎，不提取")
+    ap.add_argument("--mfa", metavar="OUT",
+                    help="用第三方工具把成品导成 .mfa（需要 ME_MFA_TOOL 或 --mfa-tool）")
+    ap.add_argument("--mfa-tool", metavar="PATH",
+                    help="第三方 mfa 导出工具路径（也可用 ME_MFA_TOOL）")
     ap.add_argument("--tools", action="store_true", help="检查外部 CLI 是否齐全")
     ap.add_argument("--tools-dir", metavar="DIR",
                     help="指定外部工具根目录（写进 toolsdir.ini，下次生效）")
@@ -134,6 +138,8 @@ def _dispatch(args) -> int:
         return cmd_setup()
     if args.detect:
         return cmd_detect(args.target)
+    if args.mfa:
+        return cmd_mfa(Path(args.target) if args.target else None, args)
     if args.rebuild:
         return cmd_rebuild(Path(args.target) if args.target else None, args)
     if args.repair:
@@ -754,6 +760,42 @@ def cmd_setup() -> int:
                 out_root=str(setup_ini.output_root()),
                 error=cfg["error"] or None)
     return config.EXIT_OK
+
+
+def cmd_mfa(target, args) -> int:
+    """第三方通道兜底：把成品导成 .mfa。
+
+    自研写入器（``me/formats/ctf25/mfa.py``）还在补「帧内对象 / 事件」与
+    CCN → MFA 的映射，所以这条路临时兜着：调用户给的外部工具，
+    按「退出码 0 + 产物开头是 MFU2」验收，不认账就不报成功。
+    """
+    if not target:
+        ui.error("--mfa 需要指定目标路径")
+        return config.EXIT_ARGS
+    if not target.exists():
+        ui.error(f"路径不存在: {target}")
+        return config.EXIT_TARGET
+    from me.formats.ctf25 import mfa_tool
+    out = Path(args.mfa).expanduser()
+    if out.suffix.lower() != ".mfa":
+        ui.warn(f"输出后缀不是 .mfa: {out.name}")
+    res = mfa_tool.convert(target, out, tool=args.mfa_tool or "")
+    events.emit("mfa", ok=bool(res.ok), reason=res.reason,
+                tool=res.tool, command=list(res.command),
+                exit_code=res.exit_code, out=res.out_path,
+                size=res.out_size)
+    if res.ok:
+        ui.ok(f"已导出 mfa: {res.out_path}（{res.out_size:,} B）")
+        ui.detail(f"工具: {res.tool}")
+        return config.EXIT_OK
+    ui.error(f"mfa 导出失败: {res.reason}")
+    if res.tool:
+        ui.detail(f"工具: {res.tool}")
+    for line in (res.stderr or "").strip().splitlines()[-3:]:
+        ui.detail(f"stderr: {line}")
+    if "ME_MFA_TOOL" in res.reason:
+        return config.EXIT_TOOL
+    return config.EXIT_EMPTY
 
 
 def cmd_detect(target) -> int:

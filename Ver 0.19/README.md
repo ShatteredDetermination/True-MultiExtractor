@@ -59,6 +59,9 @@ MultiExtractorCLI.exe --setup
 
 :: 保留中间产物（脱壳 / 解包结果），排查问题时使用
 MultiExtractorCLI.exe "D:\Games\SomeGame" --keep-work
+
+:: 导成 Fusion 2.5 工程（第三方通道兜底，需要 ME_MFA_TOOL）
+MultiExtractorCLI.exe "D:\Games\SomeGame.exe" --mfa D:\out\SomeGame.mfa
 ```
 
 源码版：上文的 `MultiExtractorCLI.exe` 替换为 `python main.py`。
@@ -319,6 +322,8 @@ exe；代价是**放弃 ClickOnce**（单文件/自包含不支持），分发�
 | `ME_UNITY_IMAGE_TYPES` | 覆盖 Unity 图片一轮的 `--types`；空串 = 不限类型、全量导出 |
 | `ME_UNITY_AUDIO_TYPES` | 覆盖 Unity 音频一轮的 `--types`；同上 |
 | `ME_TEXTURE_PAGES` | 设为 `1` 时，GameMaker 额外导出整张纹理页（体积大，与精灵重复） |
+| `ME_MFA_TOOL` | MFA 导出兜底通道：能导 `.mfa` 的外部工具路径（留空则查 `PATH` 里的 `ctfak-mfa` / `mfa-export`） |
+| `ME_MFA_TOOL_ARGS` | 该工具的参数模板，用 `{in}` / `{out}` 占位，默认 `{in} {out}` |
 | `ME_NO_PAUSE` | 设为 `1` 时，双击运行结束后不等待按键（脚本 / 自动化调用） |
 
 例：
@@ -368,8 +373,35 @@ python main.py "D:\Games\SomeGacha"
 | `soundbank.py` | 音频条目解析 |
 | `fontbank.py` | 字体元数据 + 内嵌 TTF |
 | `extractor.py` | 对外入口 |
+| `mfa.py` | MFA（`MFU2` 工程文件）读写：前段、五个资源库、应用设置、菜单区、全局量区、帧头部、chunk 列表；真样本上整份**逐字节重建** |
+| `mfa_tool.py` | MFA 导出的第三方通道兜底（见下） |
 
 两种发布形态均支持：`.dat` 数据文件形态、单文件 exe 形态。
+
+#### MFA 导出（V0.19 开发中）
+
+目标是把成品反编译成 `Fusion 2.5` 能打开的 `.mfa` 工程。目前分两条路：
+
+**自研通道**（`mfa.py`）：MFA 的容器结构已经全部摸通 —— 前段 + 五个资源库 +
+应用设置 + 菜单区 + 全局量区 + 帧偏移表 + 帧头部 + 对象 chunk 列表，
+在 `Template.mfa`（193,891 B）与 `Platformer Engine.mfa`（423,160 B）上
+`build_project(read_project(raw)) == raw`，**整份逐字节重建**。
+还差的是「帧内的图层 / 对象 / 实例 / 事件」字段与 CCN → MFA 的映射，所以
+**现在还不能把成品导成 mfa**，这一点不在文档里含糊。
+
+**第三方通道兜底**（`mfa_tool.py` + `--mfa`）：如果你已经有能导 `.mfa` 的现成工具，
+让本程序替你调它：
+
+```bat
+set ME_MFA_TOOL=D:\Tools\mfa-export.exe
+set ME_MFA_TOOL_ARGS={in} {out}
+MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
+```
+
+判定标准是硬的：退出码 0、输出文件存在、开头必须是 `MFU2`，三条缺一算失败；
+工具没配、参数模板缺 `{in}` / `{out}`、超时、退出码非 0、产物不是 MFA，
+都会在返回值里写明原因，不会报「成功」。退出码：成功 `0`，找不到工具 `4`，
+工具跑了但没产出可用的 mfa `3`。
 
 ### Enigma Virtual Box
 

@@ -24,7 +24,9 @@ MFA 是 `MFU2` 头 + 工程字符串 + 缩略图 + 四个资源库 + 应用设�
 | 对象 chunk 列表 | `MfaChunk` / `MfaChunkList` / `read_chunk_list` / `build_chunk_list`：`u8 id + i32 size + 数据`，收尾是**一个字节的 0**；两份样本各 47 条、id 序列一模一样、正好收到 EOF |
 | 整份工程重建 | `MfaProject` / `read_project` / `build_project` / `describe_project`：七段串起来，`build_project(read_project(raw)) == raw` —— 两份样本**整份逐字节重建**（193,891 / 423,160 B） |
 | 帧头部 | `MfaFrame` / `read_frame` / `build_frame` / `describe_frame`：句柄、帧名、宽高、背景色、帧 flags、最大对象数、密码、未知串、最后查看 X/Y、256 色调色板、图章句柄、当前图层；**图层及之后仍是原字节** |
+| 第三方通道兜底 | `mfa_tool.py` + CLI `--mfa OUT` / `--mfa-tool PATH`：调用户给的外部工具，按「退出码 0 + 产物开头 `MFU2`」验收；没工具退出码 4、工具跑了没产出 3，原因写清楚 |
 | `selftest/test_mfa.py` | 184 项、12 段：CString、合成前段回环、两个真样本逐字节回环、库解析、库逐字节重建、应用设置段、进度尺、菜单区、全局量区 + 帧偏移表、对象 chunk 列表、整份工程重建、帧头部 |
+| `selftest/test_mfa_tool.py` | 24 项、6 段：找工具（显式 / 环境变量 / PATH）、参数模板校验、成功路径、四种失败路径（非 0 退出码 / 产物非 MFA / 没产物 / 残留旧产物）、缺工具与缺输入、CLI `--mfa` 两层（成功退出 0、没工具退出 4） |
 | 参考样本 | `Template.mfa`（193,891 B，MFU2 v6）、`Platformer Engine.mfa`（423,160 B，MFU2 v7），都在 `C:\拆包教程素材\Clickteam MFA 样本\` |
 
 **当前进度（真样本实测，不是估的）**：
@@ -48,9 +50,10 @@ MFA 是 `MFU2` 头 + 工程字符串 + 缩略图 + 四个资源库 + 应用设�
 4. **全局值 / 全局字符串的非空条目**：要一份真项目样本才能定字段，不猜。
 5. **菜单块内部**：标题 / 菜单项 / 快捷键（现在整块原样保留，`&File`、`F2`、
    `Ctrl+P` 都在里面）。
-6. **CCN → MFA 映射 + CLI**：把已落地的 CCN chunk（`me/formats/ctf25/`）灌进
-   `MfaProject`，接 `--mfa 输出.mfa` 与壳的软键；用 `Template.mfa` 当骨架补默认段。
-7. **第三方通道兜底** + 文档：现成工具导 mfa 的路径与失败时的说明。
+6. **CCN → MFA 映射**：把已落地的 CCN chunk（`me/formats/ctf25/`）灌进
+   `MfaProject`，让 `--mfa 输出.mfa` 从「调外部工具」变成「自研通道优先」；
+   用 `Template.mfa` 当骨架补默认段，第三方通道退成兜底。
+7. **壳的软键**：把 `--mfa` 接到 GUI 壳上（现在只有命令行）。
 
 **验收口径**：本机没有 Fusion 编辑器，最终必须由用户在 Fusion 2.5 里打开生成的
 mfa 才算过；在那之前，自测只保证「结构自洽 + 真样本回环」，不谎称「能打开」。

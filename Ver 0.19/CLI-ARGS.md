@@ -23,6 +23,8 @@ MultiExtractorCLI.exe [<target>] [选项...]
 | `--no-deep` | 开关 | 关 | 不解容器，仅收集散落文件 |
 | `--keep-work` | 开关 | 关 | 保留 `work/` 中间产物 |
 | `--detect` | 开关 | 关 | 只识别引擎，不提取；需要 `<target>` |
+| `--mfa` | 输出文件路径 | 无 | 用第三方工具把成品导成 `.mfa`（需要 `ME_MFA_TOOL` 或 `--mfa-tool`）；需要 `<target>` |
+| `--mfa-tool` | 工具路径 | `ME_MFA_TOOL` | 第三方 mfa 导出工具；参数模板见 `ME_MFA_TOOL_ARGS`（默认 `{in} {out}`） |
 | `--rebuild` | 开关 | 关 | 全量重建 GameMaker 容器（不等长），写 `<名字>_rebuilt.win` |
 | `--repair` | 开关 | 关 | 只重建 GameMaker 容器，写 `<名字>_rebuilt.win`，不提取 |
 | `--fix` | 开关 | 关 | 先重建再提取，重建产物落在 `work/` |
@@ -269,7 +271,7 @@ label:"自研"|"第三方", note}`，`result.channel` 同值。GUI 上有两个�
 | `1` | `<target>` 不存在或不可读 |
 | `2` | 参数错误（未知参数、非法分类、`--json`/`--detect` 缺目标） |
 | `3` | 执行结束，未提取到任何文件 |
-| `4` | 缺少外部 CLI（仅 `--tools`） |
+| `4` | 缺少外部 CLI（`--tools`；`--mfa` 找不到导出工具时也是它） |
 | `5` | 被 `--cancel-file` 取消 |
 | `70` | 未预期的内部异常 |
 | `130` | Ctrl+C |
