@@ -41,10 +41,13 @@ CString 编码（实测）：u32 长度，最高位 ``0x80000000`` 表示 UTF-16
     Template.mfa          193,891 B  MFU2 v6  build 292  工程名 'Template'
     Platformer Engine.mfa 423,160 B  MFU2 v7  build 292  工程名 'Platformer Engine'
 
-后续要补的三块（都还没落地，别在这儿假装读懂）：
-  * 四个库的条目布局（图像条目 NebulaFD 也没实现，需要自己从真文件推）
-  * 应用设置之后的全局值 / 全局字符串 / 全局事件
-  * 帧（绝对偏移表指向）与帧后的对象 chunk 列表（u8 id + i32 size，id=0 收尾）
+后续要补的两块（都还没落地，别在这儿假装读懂）：
+  * **图像条目布局**：库头（graphicMode / 调色板 / 图像数）已经读得出来，
+    但条目字段宽度不是 4 字节对齐的（真样本 0x1CFA 起：00 00 00 00 /
+    63 92 00 00 / 01 00 00 00 / 00 4F 09 00 / 00 30 00 30 00 …），
+    照 CCN 的 2.5+ 布局去读会得到「6151x0」这种荒谬尺寸；
+  * 应用设置之后的全局值 / 全局字符串 / 全局事件、帧（绝对偏移表指向）、
+    帧后的对象 chunk 列表（u8 id + i32 size，id=0 收尾）。
 """
 
 import struct
@@ -204,3 +207,253 @@ def describe(p: MfaPreamble) -> str:
 def read_file(path) -> MfaPreamble:
     p = Path(path)
     return read_preamble(p.read_bytes())
+
+
+# ------------------------------------------------------------------ 四个资源库
+# 布局依据：真样本逐字段对齐（Template v6 / Platformer v7），不是猜的。
+#
+# 字体条目（实测偏移，Platformer 的 "Free Pixel"）::
+#
+#     u32 handle / i32 checksum / u32 references / i32 dataSize
+#     i32 height(负=字号) i32 width i32 escapement i32 orientation i32 weight
+#     u8 italic / u8 underline / u8 strikeOut / u8 charSet
+#     u8 outPrecision / u8 clipPrecision / u8 quality / u8 pitchAndFamily
+#     32 个 UTF-16 字符的名字（64 字节，定长，不带头）
+#     dataSize 字节的字体数据（内嵌 TTF 时才有）
+#
+# 图像库头（图标库与图像库同一种）::
+#
+#     u32 graphicMode / u16 paletteVersion / u16 paletteEntries
+#     paletteEntries × 4 字节调色板
+#     u32 图像数
+#
+# **图像条目本身还没拿下**：真样本里条目的字段宽度不是 4 字节对齐的
+# （0x1CFA 起 00 00 00 00 / 63 92 00 00 / 01 00 00 00 / 00 4F 09 00 /
+#  00 30 00 30 00 …），照 CCN 的 2.5+ 布局去读会得到「6151x0」这种荒谬尺寸。
+# 所以这里只解析库头，条目按原始字节留着，等把布局推出来再补。
+
+FONT_NAME_CHARS = 32
+
+
+@dataclass
+class FontEntry:
+    handle: int = 0
+    checksum: int = 0
+    references: int = 0
+    data_size: int = 0
+    height: int = 0
+    width: int = 0
+    escapement: int = 0
+    orientation: int = 0
+    weight: int = 0
+    italic: int = 0
+    underline: int = 0
+    strike_out: int = 0
+    charset: int = 0
+    out_precision: int = 0
+    clip_precision: int = 0
+    quality: int = 0
+    pitch_family: int = 0
+    name: str = ""
+    data: bytes = b""
+
+    @property
+    def size_px(self) -> int:
+        return abs(self.height)
+
+    def __repr__(self) -> str:
+        return (f"<Font #{self.handle} {self.name!r} {self.size_px}px "
+                f"weight={self.weight} ttf={len(self.data)}B>")
+
+
+@dataclass
+class SoundEntry:
+    handle: int = 0
+    checksum: int = 0
+    references: int = 0
+    data_size: int = 0
+    flags: int = 0
+    frequency: int = 0
+    name: str = ""
+    data: bytes = b""
+
+    def __repr__(self) -> str:
+        return (f"<Sound #{self.handle} {self.name!r} {len(self.data)}B "
+                f"freq={self.frequency} flags=0x{self.flags:08X}>")
+
+
+@dataclass
+class MusicEntry:
+    handle: int = 0
+    checksum: int = 0
+    references: int = 0
+    data_size: int = 0
+    flags: int = 0
+    frequency: int = 0
+    name: str = ""
+    data: bytes = b""
+
+    def __repr__(self) -> str:
+        return (f"<Music #{self.handle} {self.name!r} {len(self.data)}B>")
+
+
+@dataclass
+class ImageBankHeader:
+    """图标库 / 图像库的公共头。条目本身还没解析（见上面的说明）。"""
+    label: str = ""
+    graphic_mode: int = 0
+    palette_version: int = 0
+    palette_entries: int = 0
+    palette: List[bytes] = None
+    count: int = 0
+    entries_offset: int = 0
+    raw_tail: bytes = b""
+
+    def __repr__(self) -> str:
+        return (f"<{self.label} mode={self.graphic_mode} "
+                f"palette={self.palette_version}/{self.palette_entries} "
+                f"count={self.count}>")
+
+
+@dataclass
+class MfaBanks:
+    fonts: List[FontEntry] = None
+    sounds: List[SoundEntry] = None
+    music: List[MusicEntry] = None
+    icons: Optional[ImageBankHeader] = None
+    images: Optional[ImageBankHeader] = None
+
+    def __post_init__(self):
+        self.fonts = self.fonts or []
+        self.sounds = self.sounds or []
+        self.music = self.music or []
+
+
+def _read_font(r: Reader) -> FontEntry:
+    f = FontEntry()
+    f.handle = r.u32()
+    f.checksum = r.i32()
+    f.references = r.u32()
+    f.data_size = r.i32()
+    f.height = r.i32()
+    f.width = r.i32()
+    f.escapement = r.i32()
+    f.orientation = r.i32()
+    f.weight = r.i32()
+    f.italic = r.take(1)[0]
+    f.underline = r.take(1)[0]
+    f.strike_out = r.take(1)[0]
+    f.charset = r.take(1)[0]
+    f.out_precision = r.take(1)[0]
+    f.clip_precision = r.take(1)[0]
+    f.quality = r.take(1)[0]
+    f.pitch_family = r.take(1)[0]
+    raw_name = r.take(FONT_NAME_CHARS * 2)
+    f.name = raw_name.decode("utf-16-le", "replace").rstrip("\x00").strip()
+    if f.data_size < 0 or f.data_size > len(r.buf):
+        raise MfaError(f"字体数据长度异常 {f.data_size}")
+    f.data = r.take(f.data_size)
+    return f
+
+
+def _read_sound(r: Reader) -> SoundEntry:
+    s = SoundEntry()
+    s.handle = r.u32() - 1
+    s.checksum = r.i32()
+    s.references = r.u32()
+    s.data_size = r.i32()
+    s.flags = r.u32()
+    s.frequency = r.i32()
+    name_len = r.i32()
+    if s.data_size < 0 or s.data_size > len(r.buf):
+        raise MfaError(f"音频数据长度异常 {s.data_size}")
+    blob = r.take(s.data_size)
+    inner = Reader(blob)
+    if name_len < 0 or name_len * 2 > len(blob):
+        raise MfaError(f"音频名字长度异常 {name_len}")
+    s.name = inner.take(name_len * 2).decode("utf-16-le", "replace").rstrip("\x00")
+    s.data = blob[inner.pos:]
+    return s
+
+
+def _read_music(r: Reader) -> MusicEntry:
+    m = MusicEntry()
+    m.handle = r.u32()
+    m.checksum = r.i32()
+    m.references = r.u32()
+    m.data_size = r.i32()
+    m.flags = r.u32()
+    m.frequency = r.i32()
+    name_len = r.i32()
+    if m.data_size < 0 or m.data_size > len(r.buf):
+        raise MfaError(f"音乐数据长度异常 {m.data_size}")
+    if name_len < 0 or name_len > m.data_size:
+        raise MfaError(f"音乐名字长度异常 {name_len}")
+    m.name = r.take(name_len * 2).decode("utf-16-le", "replace").rstrip("\x00")
+    m.data = r.take(m.data_size - name_len * 2)
+    return m
+
+
+def _read_image_bank_header(r: Reader, label: str) -> ImageBankHeader:
+    h = ImageBankHeader(label=label)
+    h.graphic_mode = r.u32()
+    h.palette_version = r.u16()
+    h.palette_entries = r.u16()
+    if h.palette_entries > 4096:
+        raise MfaError(f"{label} 调色板条目异常 {h.palette_entries}")
+    h.palette = [r.take(4) for _ in range(h.palette_entries)]
+    h.count = r.u32()
+    h.entries_offset = r.pos
+    return h
+
+
+def read_banks(buf: bytes, start: int) -> MfaBanks:
+    """从 ``ATNF`` 开始把四个库读出来。
+
+    图标库和图像库的条目还没落地，所以这两段只读到「库头 + 图像数」；
+    图标条目按「下一个 AGMI」切开（真样本里 AGMI 在条目数据中不出现），
+    图像库之后的内容不再推进 —— 调用方需要的话看 ``entries_offset``。
+    """
+    r = Reader(buf, start)
+    b = MfaBanks()
+
+    if r.tag() != TAG_FONTS:
+        raise MfaError(f"字体库标记不对 @0x{start:X}")
+    for _ in range(r.u32()):
+        b.fonts.append(_read_font(r))
+
+    if r.tag() != TAG_SOUNDS:
+        raise MfaError(f"音频库标记不对 @0x{r.pos - 4:X}")
+    for _ in range(r.u32()):
+        b.sounds.append(_read_sound(r))
+
+    if r.tag() != TAG_MUSIC:
+        raise MfaError(f"音乐库标记不对 @0x{r.pos - 4:X}")
+    for _ in range(r.u32()):
+        b.music.append(_read_music(r))
+
+    if r.tag() != TAG_ICONS:
+        raise MfaError(f"图标库标记不对 @0x{r.pos - 4:X}")
+    b.icons = _read_image_bank_header(r, "图标库")
+
+    # 图标条目布局未落地：按下一个 AGMI 切开
+    nxt = buf.find(TAG_IMAGES, r.pos)
+    if nxt < 0:
+        raise MfaError("找不到图像库标记")
+    b.icons.raw_tail = buf[r.pos:nxt]
+
+    r.pos = nxt
+    if r.tag() != TAG_IMAGES:
+        raise MfaError("图像库标记不对")
+    b.images = _read_image_bank_header(r, "图像库")
+    b.images.raw_tail = b""            # 后面是应用设置，不能猜长度
+    return b
+
+
+def describe_banks(b: MfaBanks) -> str:
+    parts = [f"字体 {len(b.fonts)}", f"音频 {len(b.sounds)}", f"音乐 {len(b.music)}"]
+    if b.icons:
+        parts.append(f"图标 {b.icons.count}")
+    if b.images:
+        parts.append(f"图像 {b.images.count}")
+    return " / ".join(parts)

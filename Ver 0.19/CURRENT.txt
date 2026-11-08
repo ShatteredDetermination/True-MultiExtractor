@@ -1239,3 +1239,42 @@ V0.19 起线：目标「可反编译出 mfa」（0.18R Beta 00098 -> 0.19WIP Bet
 
 验收口径写死在文档里：本机没有 Fusion 编辑器，**最终要用户拿生成的 mfa 在
 Fusion 2.5 里打开才算过**；在那之前自测只保证「结构自洽 + 真样本回环」。
+
+------------------------------------------------------------------------------
+V0.19 第二轮：四个资源库（0.19WIP Beta 00099）
+------------------------------------------------------------------------------
+上一轮只读到「五个库标记」，这一轮把字体 / 音频 / 音乐三个库按真样本的字段
+布局读通，图像库读到「库头 + 图像数」，条目留着等布局推出来。
+
+字体条目（Platformer 的那条，逐字段对齐过）：
+  u32 handle / i32 checksum / u32 references / i32 dataSize
+  i32 height(负=字号) / i32 width / i32 escapement / i32 orientation / i32 weight
+  u8 italic underline strikeOut charSet / u8 outPrecision clipPrecision quality
+  pitchAndFamily
+  32 个 UTF-16 字符的定长名字（64 字节，不带头）
+  dataSize 字节字体数据
+
+  实测：<Font #1 'Free Pixel' 27px weight=400 ttf=0B>
+  注意这里比我一开始写的少一个 i32：多写一个「保留字段」会让条目长 112 而不是
+  108，位置正好差 4 字节、把 APMS 读成 0000 —— 是这条偏差帮我确认了字段表。
+
+音频 / 音乐条目（按 handle、checksum、references、dataSize、flags、frequency、
+nameLength 的顺序；名字是 nameLength 个 UTF-16 字符，随后是数据）。
+
+图像库头（图标库和图像库同一种）：
+  u32 graphicMode / u16 paletteVersion / u16 paletteEntries
+  paletteEntries × 4 字节调色板 / u32 图像数
+
+  实测：图标库 graphicMode=4 paletteVersion=768 entries=256
+        Template：图标 12 / 图像 15
+        Platformer：图标 24 / 图像 33
+
+  图像条目还没拿下：条目起点字节就不是 4 字节对齐的
+  （00 00 00 00 / 63 92 00 00 / 01 00 00 00 / 00 4F 09 00 / 00 30 00 30 00 …），
+  拿 CCN 的 2.5+ 布局去套会读出 6151x0 这种尺寸。所以 raw_tail 原样留着，
+  不猜。
+
+自测：test_mfa 从 24 项扩到 44 项，全过
+  CString 编码 6 项、合成前段回环 7 项、真样本前段 12 项、资源库 19 项
+  （含「音频库标记被改坏要抛 MfaError」）。
+全量：ME_NO_NET=1 python selftest/run_all.py -> 36/36 通过。

@@ -133,13 +133,74 @@ def test_samples():
         check(mfa.build_preamble(pre) == raw, f"{path.name} 逐字节回环")
 
 
+def test_banks():
+    """四个资源库：字体/音频/音乐按已对齐的布局读，图像只读库头。"""
+    section("4. 资源库（字体 / 音频 / 音乐 / 图标与图像的库头）")
+    present = [p for p in SAMPLES if p.exists()]
+    if not present:
+        global SKIPPED
+        SKIPPED += 1
+        print("  [skip] 参考 MFA 样本不在本机")
+        return
+
+    for path in present:
+        raw = path.read_bytes()
+        pre = mfa.read_preamble(raw)
+        banks = mfa.read_banks(raw, len(raw) - len(pre.banks_raw))
+        tag = path.name
+
+        check(banks.icons is not None and banks.images is not None, f"{tag} 两个图像库都读到")
+        if not (banks.icons and banks.images):
+            continue
+
+        check(banks.icons.graphic_mode == 4, f"{tag} 图标库 graphicMode=4",
+              banks.icons.graphic_mode)
+        check(banks.icons.palette_entries == 256, f"{tag} 调色板 256 条",
+              banks.icons.palette_entries)
+        check(banks.icons.count > 0, f"{tag} 图标数 {banks.icons.count}")
+        check(banks.images.count > 0, f"{tag} 图像数 {banks.images.count}")
+        check(len(banks.icons.raw_tail) > 0, f"{tag} 图标条目原样保留",
+              f"{len(banks.icons.raw_tail)} B")
+
+        for f in banks.fonts:
+            check(f.name != "", f"{tag} 字体名 {f.name!r}")
+            check(f.size_px > 0, f"{tag} 字号 {f.size_px}")
+            check(f.weight >= 0, f"{tag} 字重 {f.weight}")
+
+    # Platformer 的那条字体是已知的，钉死
+    pf = SAMPLES[1]
+    if pf.exists():
+        raw = pf.read_bytes()
+        pre = mfa.read_preamble(raw)
+        banks = mfa.read_banks(raw, len(raw) - len(pre.banks_raw))
+        if banks.fonts:
+            f = banks.fonts[0]
+            check(f.name == "Free Pixel", "Platformer 字体名 = Free Pixel", f.name)
+            check(f.size_px == 27, "Platformer 字号 = 27", f.size_px)
+            check(f.weight == 400, "Platformer 字重 = 400", f.weight)
+            check(f.data == b"", "Platformer 字体没内嵌 TTF")
+
+    # 标记被改坏要报错
+    raw = bytearray(present[0].read_bytes())
+    pre = mfa.read_preamble(bytes(raw))
+    start = len(raw) - len(pre.banks_raw)
+    i = raw.find(mfa.TAG_SOUNDS, start)
+    raw[i:i + 4] = b"ZZZZ"
+    try:
+        mfa.read_banks(bytes(raw), start)
+        check(False, "音频库标记坏掉要报错")
+    except mfa.MfaError:
+        check(True, "音频库标记坏掉要报错")
+
+
 def main() -> int:
     print("=" * 66)
-    print("  MFA 前段读写自测")
+    print("  MFA 前段与资源库自测")
     print("=" * 66)
     test_cstring()
     test_synthetic()
     test_samples()
+    test_banks()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")
