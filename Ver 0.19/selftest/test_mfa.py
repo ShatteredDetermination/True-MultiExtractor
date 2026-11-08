@@ -320,6 +320,39 @@ def test_layout():
         check("尾巴" in mfa.describe_layout(lay), f"{p.name} 概况串")
 
 
+def test_menu():
+    section("8. 菜单区")
+    try:
+        mfa.read_menu_region(b"\xff\xff\xff\xff", 0)
+        check(False, "菜单块长度越界要报错")
+    except mfa.MfaError:
+        check(True, "菜单块长度越界要报错")
+
+    m = mfa.MfaMenuRegion(menu_size=4, menu_raw=b"\x01\x02\x03\x04",
+                          window_menu=2, menu_images=[(10, 3), (11, 4)])
+    check(mfa.read_menu_region(mfa.build_menu_region(m), 0)[0] == m,
+          "合成菜单区回环")
+
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    for p in present:
+        raw = p.read_bytes()
+        lay = mfa.read_layout(raw)
+        m, end = mfa.read_menu_region(raw, lay.tail_offset)
+        check(m.menu_size == 550, f"{p.name} 菜单块 550 B", f"{m.menu_size}")
+        check(m.window_menu == 0, f"{p.name} 窗口菜单 #0", f"{m.window_menu}")
+        check(len(m.menu_images) == 1, f"{p.name} 菜单图形 1 项",
+              f"{len(m.menu_images)}")
+        check(mfa.build_menu_region(m) == raw[lay.tail_offset:end],
+              f"{p.name} 菜单区逐字节回写（{end - lay.tail_offset} B）")
+        check(b"&\x00F\x00i\x00l\x00e\x00" in m.menu_raw,
+              f"{p.name} 菜单块里能找到 \"&File\"")
+        check(end > lay.tail_offset and end <= lay.file_size,
+              f"{p.name} 菜单区结束偏移 0x{end:X}")
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -331,6 +364,7 @@ def main() -> int:
     test_write_banks()
     test_app_header()
     test_layout()
+    test_menu()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")

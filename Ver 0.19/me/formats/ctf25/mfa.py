@@ -870,3 +870,59 @@ def describe_layout(lay: MfaLayout) -> str:
             f"应用设置@{lay.app_offset:#x}({lay.app.width}x{lay.app.height}) "
             f"已解析 {lay.tail_offset:#x}/{lay.file_size:#x}"
             f"({lay.coverage:.1f}%) 尾巴 {lay.tail_size} B")
+
+
+# -------------------------------------------------------------------- 菜单区
+# 应用设置段之后立刻是菜单区，布局按公开实现（NebulaFD MFAPackageData.cs /
+# CTFAK MFA.cs 的读序，两处一致）：
+#
+#     u32 menuSize          菜单块字节数（不含这个长度字段自己）
+#     menuSize 字节         菜单块（AppMenu 内部结构，本轮先整块保留）
+#     i32 windowMenu        窗口菜单索引
+#     i32 菜单图形数 + 每项 i32 id / i32 图像序号
+#
+# 菜单块内部（每个菜单的标题、菜单项、快捷键）还没拆，所以整块按原字节留存 ——
+# 只要「长度字段 + 跳过 + 后面两段」对得上，就说明边界找对了。
+
+@dataclass
+class MfaMenuRegion:
+    menu_size: int = 0
+    menu_raw: bytes = b""
+    window_menu: int = 0
+    menu_images: List[tuple] = None
+
+    def __post_init__(self):
+        self.menu_images = self.menu_images if self.menu_images is not None else []
+
+
+def read_menu_region(buf: bytes, pos: int):
+    """读菜单区，返回 (MfaMenuRegion, 区后偏移)。"""
+    r = Reader(buf, pos)
+    m = MfaMenuRegion(menu_size=r.u32())
+    if m.menu_size > len(buf) - r.pos:
+        raise MfaError(f"菜单块长度 {m.menu_size} B 超出文件尾 @0x{pos:X}")
+    m.menu_raw = r.take(m.menu_size)
+    m.window_menu = r.i32()
+    n = r.u32()
+    if n > 4096:
+        raise MfaError(f"菜单图形条目数异常 {n}")
+    for _ in range(n):
+        m.menu_images.append((r.i32(), r.i32()))
+    return m, r.pos
+
+
+def build_menu_region(m: MfaMenuRegion) -> bytes:
+    w = Writer()
+    w.u32(m.menu_size if m.menu_size else len(m.menu_raw))
+    w.raw(m.menu_raw)
+    w.i32(m.window_menu)
+    w.u32(len(m.menu_images))
+    for mid, img in m.menu_images:
+        w.i32(mid)
+        w.i32(img)
+    return w.getvalue()
+
+
+def describe_menu(m: MfaMenuRegion) -> str:
+    return (f"菜单块 {m.menu_size} B 窗口菜单 #{m.window_menu} "
+            f"菜单图形 {len(m.menu_images)} 项")
