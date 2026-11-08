@@ -1530,7 +1530,7 @@ read_project 现在按帧偏移表把帧切出来逐个读，build_project 用 b
 再帧内对象/实例/事件；然后全局值非空条目、菜单块内部、CCN -> MFA 映射 + CLI、
 第三方通道兜底与文档。
 
-=== 2026-02（第 8 轮 / 0.19WIP Beta 00103）第三方 mfa 通道兜底 + CLI --mfa ===
+=== 2026-02（第 8 轮 / 0.19WIP Beta 00104）第三方 mfa 通道兜底 + CLI --mfa ===
 
 自研写入器还差「帧内图层/对象/实例/事件」与 CCN -> MFA 映射，这轮先把
 目标里的另一条腿落地：第三方通道兜底，并且接到命令行上。
@@ -1566,38 +1566,3 @@ Fusion 2.5 小节里的「MFA 导出」两条路）、CLI-ARGS.md（参数总表
 全量：此前一次 run_all 为 37/37 通过（新增了这一份）；用户要求不再跑全量，
 此后按需单跑。
 
-=== 2026-02（第 8 轮 / 0.19WIP Beta 00103）第三方 mfa 通道兜底 + CLI --mfa ===
-
-自研写入器还差「帧内图层/对象/实例/事件」与 CCN -> MFA 映射，这轮先把
-目标里的另一条腿落地：第三方通道兜底，并且接到命令行上。
-
-新增 me/formats/ctf25/mfa_tool.py：
-  find_tool(显式路径 -> ME_MFA_TOOL -> PATH 里的 ctfak-mfa / mfa-export)
-  build_command(参数模板 {in} / {out}，shlex 拆，缺占位符直接报错)
-  convert(...) -> MfaToolResult（ok / reason / tool / command / exit_code /
-  stdout / stderr / out_path / out_size）
-  验收是硬的：退出码 0、输出文件存在、开头必须是 MFU2，三条缺一判失败；
-  跑之前先删旧产物，避免把上一次的 mfa 当本次成功。
-  找不到工具时说清「ME_MFA_TOOL 没设、PATH 里也没有」，不假装能导。
-
-CLI：main.py 新增 --mfa OUT 与 --mfa-tool PATH，走 cmd_mfa()，
-  成功打印输出路径与体积、发 mfa 事件；找不到工具退出码 4（缺少外部 CLI），
-  工具跑了但没产出可用 mfa 退出码 3。
-
-自测：新增 selftest/test_mfa_tool.py（24 项、6 段，全离线）
-  1 找工具：显式 / 环境变量 / 路径不存在返回 None / 只查 PATH
-  2 参数模板：默认「输入 输出」、缺 {out} 报错、缺 {in} 报错
-  3 成功路径：退出码 0 + MFU2、产物大小、stdout、占位符替换、输出目录建好
-  4 四种失败：非 0 退出码（带 stderr）、产物非 MFA、退出码 0 但没产物、
-    残留旧产物先被清掉
-  5 缺工具 / 缺输入：原因里写清楚该配什么
-  6 CLI 层：--mfa 真跑一遍（成功退出 0 + 产物 MFU2 + 打印结果）、
-    没工具时退出码 4 且打印怎么配
-  测试用一段临时脚本冒充外部工具，靠输入前缀走不同分支，不联外网。
-
-文档：README（环境变量 ME_MFA_TOOL / ME_MFA_TOOL_ARGS、命令行示例、
-Fusion 2.5 小节里的「MFA 导出」两条路）、CLI-ARGS.md（参数总表两行、
-退出码 4 的说明）。
-
-全量：此前一次 run_all 为 37/37 通过；用户要求不再跑全量、且测试必须静默，
-此后按需单跑个别 test_*.py，不再整包跑。
