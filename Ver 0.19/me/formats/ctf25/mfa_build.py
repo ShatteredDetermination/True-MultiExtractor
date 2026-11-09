@@ -54,6 +54,7 @@ class BuildReport:
     sounds_written: int = 0
     fonts_total: int = 0
     fonts_written: int = 0
+    icons: int = 0
     width: int = 0
     height: int = 0
     fps: int = 0
@@ -345,6 +346,67 @@ def to_mfa_sound(entry) -> mfa.SoundEntry:
     )
 
 
+def read_ccn_icons(ccn_path):
+    """读成品图标块（0x2235，Icon 16x16）。
+
+    布局实测（dtlg-v1.1.0.exe，decl 1352 B，正好对得上）::
+
+        u32 40 / u32 宽 16 / u32 高 16 / u16 1 / u16 8 / 20 B 保留
+        256 × 4 B 调色板（BGRA，alpha 都写 0；前几项是 黑/红/绿/黄/蓝/品红）
+        高 × (宽 + 2) 字节的 8bpp 索引（每行按 2 字节对齐补 0）
+
+    验证：40 + 1024 + 16×18 = 1352 —— 与块长完全相等，不是凑出来的。
+    返回 [(宽, 高, 索引字节, 调色板)]。
+    """
+    import struct
+
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        ch = chunk_mod.find(chs, 0x2235)
+        if ch is None:
+            return []
+        data = chunk_mod.load(buf, ch)
+        if len(data) < 40:
+            return []
+        _, width, height, count, bpp = struct.unpack_from("<IIIHH", data, 0)
+        if not (0 < width <= 256 and 0 < height <= 256) or count != 1 or bpp != 8:
+            return []
+        size = len(data) - 40 - 1024
+        if size <= 0 or size % height:
+            return []
+        stride = size // height          # 实测 16 宽的行是 18 字节（多 2 字节）
+        if stride < width:
+            return []
+        palette = [bytes(data[40 + i * 4:40 + i * 4 + 4]) for i in range(256)]
+        base = 40 + 1024
+        indexes = b"".join(bytes(data[base + y * stride:base + y * stride + width])
+                           for y in range(height))
+        return [(width, height, indexes, palette)]
+    finally:
+        mm.close()
+
+
+def to_mfa_icon(icon) -> mfa.MfaImage:
+    """把一条 8bpp 图标展开成 MFA 的 32 位 BGRA 条目（zlib 压缩）。"""
+    width, height, indexes, palette = icon
+    out = bytearray()
+    for idx in indexes:
+        b, g, r, a = palette[idx] if idx < len(palette) else (0, 0, 0, 0)
+        out += bytes((b, g, r, 255))
+    payload = zlib.compress(bytes(out), 6)
+    return mfa.MfaImage(
+        handle=0, checksum=0, references=1,
+        data_size=len(payload) + 4,
+        width=width, height=height, graphic_mode=8, flags=0,
+        transparent=b"\x00\x00\x00\x00", decl_size=len(out),
+        pixels=bytes(out), payload=payload,
+    )
+
+
 def write_manifest(path, rep: "BuildReport", table=None) -> str:
     """把「从成品读到了什么」写成 JSON 清单，落在 mfa 旁边。
 
@@ -481,6 +543,24 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     bank.count = len(bank.entries)
     bank.graphic_mode = 8
     pr.globals.graphic_mode = 8      # 与图像库保持一致，否则体检会报不一致
+
+    try:
+        icons = read_ccn_icons(ccn_path)
+        if icons:
+            ibank = pr.layout.banks.icons
+            ibank.entries = []
+            for i, icon in enumerate(icons):
+                img = to_mfa_icon(icon)
+                img.handle = i
+                ibank.entries.append(img)
+            ibank.count = len(ibank.entries)
+            ibank.graphic_mode = 8
+            ibank.palette = list(icons[0][3])
+            ibank.palette_version = 768
+            ibank.palette_entries = 256
+            rep.icons = len(ibank.entries)
+    except Exception as exc:
+        rep.notes.append(f"图标读不出来：{exc}")
 
     try:
         metas, ttfs = read_ccn_fonts(ccn_path)

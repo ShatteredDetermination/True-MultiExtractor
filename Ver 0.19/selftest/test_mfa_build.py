@@ -213,6 +213,17 @@ def test_end_to_end():
         check(all(f.height < 0 for f in pr.layout.banks.fonts),
               "字高都按负值写")
 
+        icons = mfa_build.read_ccn_icons(sample)
+        check(len(icons) == 1 and icons[0][0] == 16 and icons[0][1] == 16,
+              "图标块解出 1 张 16x16", f"{[(i[0], i[1]) for i in icons]}")
+        check(len(icons[0][2]) == 256 and len(icons[0][3]) == 256,
+              "图标索引与调色板各 256 项")
+        img0 = mfa_build.to_mfa_icon(icons[0])
+        check(img0.width == 16 and img0.decl_size == 16 * 16 * 4,
+              "图标展开成 32 位 BGRA")
+        check(pr.layout.banks.icons.count == rep.icons == 1,
+              "mfa 里也换成成品的图标", f"{pr.layout.banks.icons.count}")
+
         import json
         man = Path(rep.manifest)
         check(man.is_file() and man.name.endswith(".mfa.json"),
