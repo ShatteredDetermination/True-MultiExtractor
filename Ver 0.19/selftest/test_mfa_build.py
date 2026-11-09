@@ -102,6 +102,30 @@ def struct_pack_u32(v: int) -> bytes:
     return struct.pack("<I", v)
 
 
+def test_fonts():
+    section("1c. 字体转换")
+
+    class M:
+        handle = 2
+        checksum = 5
+        references = 1
+        height = 24
+        width = 0
+        weight = 0
+        italic = 0
+        underline = 0
+        strikeout = 0
+        charset = 1
+        face_name = "Pixel"
+
+    f = mfa_build.to_mfa_font(M(), b"TTF")
+    check(f.handle == 2 and f.name == "Pixel" and f.data == b"TTF",
+          "字体条目字段映射")
+    check(f.height == -24 and f.size_px == 24, "字高按负值存（与真样本一致）",
+          f"{f.height}")
+    check(f.weight == 400, "weight 缺省补 400", f"{f.weight}")
+
+
 def test_errors():
     section("2. 失败路径")
     for kwargs, what in (
@@ -177,6 +201,17 @@ def test_end_to_end():
         check(all(a.data == b.data for a, b in
                   zip(pr.layout.banks.sounds, src_sounds)),
               "音频数据与成品逐字节一致")
+        metas, ttfs = mfa_build.read_ccn_fonts(sample)
+        check(len(pr.layout.banks.fonts) == rep.fonts_written == len(metas),
+              f"字体带上 {rep.fonts_written} 条",
+              f"{len(pr.layout.banks.fonts)} vs {len(metas)}")
+        check([f.name for f in pr.layout.banks.fonts]
+              == [m.face_name for m in metas], "字体名与成品一致")
+        check(all(pr.layout.banks.fonts[i].data == ttfs[i]
+                  for i in range(min(len(ttfs), len(metas)))),
+              "内嵌 TTF 逐字节一致")
+        check(all(f.height < 0 for f in pr.layout.banks.fonts),
+              "字高都按负值写")
 
         table = mfa_build.read_ccn_objects(sample)
         objs, hsize = table.names, table.headers_size
@@ -226,6 +261,7 @@ def main() -> int:
     print("=" * 66)
     test_convert_image()
     test_sounds()
+    test_fonts()
     test_errors()
     test_end_to_end()
     print("\n" + "=" * 66)

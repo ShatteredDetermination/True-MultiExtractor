@@ -1804,3 +1804,30 @@ MFA 里帧率写成 60、MFA 里窗口尺寸与成品一致。全过（44 PASS /
   全过（52 PASS / 0 FAIL）。
 
 按用户要求：只单跑 test_mfa_build.py 与两次 CLI，没跑全量。
+
+=== 2026-11-09（第 17 轮 / 0.19WIP Beta 00113）字体库也搬进来了 ===
+
+1）新增 mfa_build.read_ccn_fonts() / to_mfa_font()
+   - 元数据走 fontbank.parse_font_meta（2.5+ 与老格式都试），
+     内嵌 TTF 走 fontbank.parse_truetype
+   - 映射：handle / checksum / references / name=face_name / data=TTF；
+     字高按 MFA 真样本的习惯写成**负值**（size_px 取绝对值）；
+     weight 缺省补 400
+   - 元数据与 TTF 条数对不上时按少的配对，并把这件事写进报告 notes，不硬凑
+
+2）实测（dtlg-v1.1.0.exe）
+   17 条字体元数据、10 份内嵌 TTF —— 报告里明确写
+   「字体元数据 17 条、内嵌 TTF 10 份，按条数少的配对」。
+   读回来的字体名与成品一致（例：Mars Needs Cunnilingus 24px、
+   Comic Sans MS pixel rus eng 20/32px、Pixelated Wingdings 32px），
+   TTF 与成品逐字节一致，字高都是负数。
+   产物 --mfa-check 零问题。
+
+3）汇总行带上字体：「… 段音频，17/17 个字体，31 帧，…」。
+
+自测：test_mfa_build.py 52 -> 59 项
+  新增第 1c 段「字体转换」：字段映射、字高按负值存、weight 缺省 400；
+  端到端新增：字体条数 = 元数据条数、字体名一致、内嵌 TTF 逐字节一致、
+  字高都为负。全过（59 PASS / 0 FAIL）。
+
+按用户要求：只单跑 test_mfa_build.py 与 CLI，没跑全量。

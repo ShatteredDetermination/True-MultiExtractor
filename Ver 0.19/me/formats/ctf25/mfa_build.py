@@ -52,6 +52,8 @@ class BuildReport:
     object_headers_size: int = 0
     sounds_total: int = 0
     sounds_written: int = 0
+    fonts_total: int = 0
+    fonts_written: int = 0
     width: int = 0
     height: int = 0
     fps: int = 0
@@ -62,8 +64,10 @@ class BuildReport:
     def summary(self) -> str:
         sounds = (f"{self.sounds_written}/{self.sounds_total} 段音频，"
                   if self.sounds_total else "")
+        fonts = (f"{self.fonts_written}/{self.fonts_total} 个字体，"
+                 if self.fonts_total else "")
         return (f"{self.images_written}/{self.images_total} 张图像，"
-                f"{sounds}{self.frames} 帧，{self.out_size:,} B → {self.out}")
+                f"{sounds}{fonts}{self.frames} 帧，{self.out_size:,} B → {self.out}")
 
 
 def _rgba_to_bgra(rgba: bytes) -> bytes:
@@ -340,6 +344,63 @@ def to_mfa_sound(entry) -> mfa.SoundEntry:
     )
 
 
+def read_ccn_fonts(ccn_path):
+    """读成品的字体：元数据（0x2246 之类）+ 内嵌 TTF。
+
+    用现成的 ``fontbank.parse_font_meta`` / ``parse_truetype``；两者条数对不上时
+    只按小的那个配对，并在返回里如实告诉调用方（不硬凑）。
+    """
+    from me.formats.ctf25 import fontbank
+    from me.formats.ctf25.extractor import _is_25plus
+
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        two = _is_25plus(chs)
+        metas = []
+        mch = chunk_mod.find(chs, ids.CHUNK_FONTS)
+        if mch is not None:
+            try:
+                metas = list(fontbank.parse_font_meta(
+                    chunk_mod.load(buf, mch), two, loc.unicode))
+            except Exception:
+                metas = list(fontbank.parse_font_meta(
+                    chunk_mod.load(buf, mch), False, loc.unicode))
+        ttf = []
+        tch = chunk_mod.find(chs, ids.CHUNK_FONTS_2)
+        if tch is not None:
+            try:
+                ttf = list(fontbank.parse_truetype(chunk_mod.load(buf, tch)))
+            except Exception:
+                ttf = []
+        return metas, ttf
+    finally:
+        mm.close()
+
+
+def to_mfa_font(meta, data: bytes) -> mfa.FontEntry:
+    """MFA 字体条目的字高按「负值」存（和真样本一致），其余原样映射。"""
+    height = abs(meta.height) or 12
+    return mfa.FontEntry(
+        handle=meta.handle,
+        checksum=meta.checksum,
+        references=meta.references,
+        data_size=len(data),
+        height=-height,
+        width=meta.width or 0,
+        weight=meta.weight or 400,
+        italic=meta.italic,
+        underline=meta.underline,
+        strike_out=meta.strikeout,
+        charset=meta.charset,
+        name=meta.face_name,
+        data=data,
+    )
+
+
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                    limit: Optional[int] = None, frame_names: bool = True,
                    progress: Optional[Callable] = None) -> BuildReport:
@@ -372,6 +433,23 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     bank.count = len(bank.entries)
     bank.graphic_mode = 8
     pr.globals.graphic_mode = 8      # 与图像库保持一致，否则体检会报不一致
+
+    try:
+        metas, ttfs = read_ccn_fonts(ccn_path)
+        rep.fonts_total = len(metas)
+        pr.layout.banks.fonts = []
+        for i, meta in enumerate(metas):
+            data = ttfs[i] if i < len(ttfs) else b""
+            try:
+                pr.layout.banks.fonts.append(to_mfa_font(meta, data))
+                rep.fonts_written += 1
+            except Exception as exc:
+                rep.notes.append(f"字体 #{meta.handle} 跳过：{exc}")
+        if ttfs and len(ttfs) != len(metas):
+            rep.notes.append(f"字体元数据 {len(metas)} 条、内嵌 TTF {len(ttfs)} 份，"
+                             "按条数少的配对")
+    except Exception as exc:
+        rep.notes.append(f"字体读不出来：{exc}")
 
     try:
         sounds = read_ccn_sounds(ccn_path, limit)
