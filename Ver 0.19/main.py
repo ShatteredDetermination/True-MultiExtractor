@@ -72,9 +72,11 @@ def _build_parser() -> "_Parser":
                     help="全量重建：按语义模型重新排布整份文件（不等长）")
     ap.add_argument("--detect", action="store_true", help="只识别引擎，不提取")
     ap.add_argument("--mfa", metavar="OUT",
-                    help="用第三方工具把成品导成 .mfa（需要 ME_MFA_TOOL 或 --mfa-tool）")
+                    help="把成品导成 .mfa（自研骨架转换优先，第三方工具兜底）")
     ap.add_argument("--mfa-tool", metavar="PATH",
                     help="第三方 mfa 导出工具路径（也可用 ME_MFA_TOOL）")
+    ap.add_argument("--mfa-template", metavar="PATH",
+                    help="自研转换用的骨架 MFA（也可用 ME_MFA_TEMPLATE）")
     ap.add_argument("--tools", action="store_true", help="检查外部 CLI 是否齐全")
     ap.add_argument("--tools-dir", metavar="DIR",
                     help="指定外部工具根目录（写进 toolsdir.ini，下次生效）")
@@ -763,11 +765,12 @@ def cmd_setup() -> int:
 
 
 def cmd_mfa(target, args) -> int:
-    """第三方通道兜底：把成品导成 .mfa。
+    """导出 .mfa：自研骨架转换优先，第三方工具兜底。
 
-    自研写入器（``me/formats/ctf25/mfa.py``）还在补「帧内对象 / 事件」与
-    CCN → MFA 的映射，所以这条路临时兜着：调用户给的外部工具，
-    按「退出码 0 + 产物开头是 MFU2」验收，不认账就不报成功。
+    自研通道（``me/formats/ctf25/mfa_build.py``）现在做的是**资源级**转换：
+    应用信息与图像库从成品搬进一份骨架 MFA，帧是骨架自带的空帧 —— 帧内对象与
+    事件还没重建，所以产物能打开、能看到图像，但不是原游戏的布局。
+    这一步不许含糊其辞，失败或降级都要说清楚。
     """
     if not target:
         ui.error("--mfa 需要指定目标路径")
@@ -775,12 +778,36 @@ def cmd_mfa(target, args) -> int:
     if not target.exists():
         ui.error(f"路径不存在: {target}")
         return config.EXIT_TARGET
-    from me.formats.ctf25 import mfa_tool
     out = Path(args.mfa).expanduser()
     if out.suffix.lower() != ".mfa":
         ui.warn(f"输出后缀不是 .mfa: {out.name}")
+
+    template = args.mfa_template or os.environ.get("ME_MFA_TEMPLATE", "")
+    reason = ""
+    if template and not args.mfa_tool:
+        from me.formats.ctf25 import mfa_build
+        try:
+            rep = mfa_build.build_from_ccn(target, out, template)
+        except Exception as exc:                 # 自研失败就退第三方
+            reason = f"自研通道失败：{exc}"
+            ui.warn(reason)
+        else:
+            ui.ok(f"已导出 mfa（资源级）: {rep.out}（{rep.out_size:,} B）")
+            ui.detail(rep.summary())
+            ui.detail(f"工程名: {rep.app_name!r}")
+            for note in rep.notes[:3]:
+                ui.detail(f"跳过: {note}")
+            ui.warn("帧内对象与事件还没有重建，帧是骨架自带的空帧；"
+                    "原游戏布局不会出现在这份 mfa 里。")
+            events.emit("mfa", ok=True, channel="self", reason="ok",
+                        out=rep.out, size=rep.out_size,
+                        images=rep.images_written, images_total=rep.images_total,
+                        frames=rep.frames, app=rep.app_name)
+            return config.EXIT_OK
+
+    from me.formats.ctf25 import mfa_tool
     res = mfa_tool.convert(target, out, tool=args.mfa_tool or "")
-    events.emit("mfa", ok=bool(res.ok), reason=res.reason,
+    events.emit("mfa", ok=bool(res.ok), channel="tool", reason=res.reason,
                 tool=res.tool, command=list(res.command),
                 exit_code=res.exit_code, out=res.out_path,
                 size=res.out_size)
@@ -789,10 +816,14 @@ def cmd_mfa(target, args) -> int:
         ui.detail(f"工具: {res.tool}")
         return config.EXIT_OK
     ui.error(f"mfa 导出失败: {res.reason}")
+    if reason:
+        ui.detail(reason)
     if res.tool:
         ui.detail(f"工具: {res.tool}")
     for line in (res.stderr or "").strip().splitlines()[-3:]:
         ui.detail(f"stderr: {line}")
+    if "ME_MFA_TOOL" in res.reason and not template:
+        ui.detail("自研通道需要骨架：加 --mfa-template PATH（或用 ME_MFA_TEMPLATE）")
     if "ME_MFA_TOOL" in res.reason:
         return config.EXIT_TOOL
     return config.EXIT_EMPTY

@@ -24,6 +24,8 @@ MFA 是 `MFU2` 头 + 工程字符串 + 缩略图 + 四个资源库 + 应用设�
 | 对象 chunk 列表 | `MfaChunk` / `MfaChunkList` / `read_chunk_list` / `build_chunk_list`：`u8 id + i32 size + 数据`，收尾是**一个字节的 0**；两份样本各 47 条、id 序列一模一样、正好收到 EOF |
 | 整份工程重建 | `MfaProject` / `read_project` / `build_project` / `describe_project`：七段串起来，`build_project(read_project(raw)) == raw` —— 两份样本**整份逐字节重建**（193,891 / 423,160 B） |
 | 帧头部 | `MfaFrame` / `read_frame` / `build_frame` / `describe_frame`：句柄、帧名、宽高、背景色、帧 flags、最大对象数、密码、未知串、最后查看 X/Y、256 色调色板、图章句柄、当前图层；**图层及之后仍是原字节** |
+| 自研骨架转换 | `mfa_build.py` + CLI `--mfa-template`：拿骨架 MFA，把成品的工程名 / 作者 / 版权与整库图像搬进去，写前自检（`read_project` 能读回）；RGBA → BGRA、zlib、`graphic_mode=8`；实测 `dtlg-v1.1.0.exe` → 1,515/1,515 张图像、7,094,120 B、4 秒 |
+| 绝对偏移重算 | `build_project` 现在按实际写出的位置重算帧偏移与回程偏移（MFA 里它们是绝对文件偏移），骨架没改动时算出与原值相同，回环仍逐字节相等 |
 | 第三方通道兜底 | `mfa_tool.py` + CLI `--mfa OUT` / `--mfa-tool PATH`：调用户给的外部工具，按「退出码 0 + 产物开头 `MFU2`」验收；没工具退出码 4、工具跑了没产出 3，原因写清楚 |
 | `selftest/test_mfa.py` | 184 项、12 段：CString、合成前段回环、两个真样本逐字节回环、库解析、库逐字节重建、应用设置段、进度尺、菜单区、全局量区 + 帧偏移表、对象 chunk 列表、整份工程重建、帧头部 |
 | `selftest/test_mfa_tool.py` | 24 项、6 段：找工具（显式 / 环境变量 / PATH）、参数模板校验、成功路径、四种失败路径（非 0 退出码 / 产物非 MFA / 没产物 / 残留旧产物）、缺工具与缺输入、CLI `--mfa` 两层（成功退出 0、没工具退出 4） |

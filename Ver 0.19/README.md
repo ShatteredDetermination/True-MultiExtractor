@@ -386,8 +386,21 @@ python main.py "D:\Games\SomeGacha"
 应用设置 + 菜单区 + 全局量区 + 帧偏移表 + 帧头部 + 对象 chunk 列表，
 在 `Template.mfa`（193,891 B）与 `Platformer Engine.mfa`（423,160 B）上
 `build_project(read_project(raw)) == raw`，**整份逐字节重建**。
-还差的是「帧内的图层 / 对象 / 实例 / 事件」字段与 CCN → MFA 的映射，所以
-**现在还不能把成品导成 mfa**，这一点不在文档里含糊。
+**自研转换已经能出 mfa（资源级）**：拿一份骨架 mfa（`--mfa-template`），
+把成品里的工程名 / 作者 / 版权与**整库图像**搬进去，写出来的文件能被自己的
+解析器完整读回（写前先自检）。
+
+```bat
+set ME_MFA_TEMPLATE=D:\拆包教程素材\Clickteam MFA 样本\Template.mfa
+MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
+```
+
+实测：`dtlg-v1.1.0.exe` → **1,515/1,515 张图像、7,094,120 B、4 秒**，
+工程名读到 `DustTale: Last Genocide`。
+
+**还做不到**：帧内的图层 / 对象 / 实例 / 事件没有重建，产物里的帧是骨架自带的
+空帧（尺寸、背景色来自骨架）。所以这是「资源级 mfa」：能打开、能看到图像与工程名，
+但**看不到原游戏的摆位**。命令行会当场打出这句警告，文档里也一样写清楚。
 
 **第三方通道兜底**（`mfa_tool.py` + `--mfa`）：如果你已经有能导 `.mfa` 的现成工具，
 让本程序替你调它：

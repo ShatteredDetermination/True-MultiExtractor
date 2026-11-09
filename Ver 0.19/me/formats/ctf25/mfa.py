@@ -1149,12 +1149,26 @@ def read_project(buf: bytes) -> MfaProject:
 
 
 def build_project(pr: MfaProject) -> bytes:
-    """把 MfaProject 写回字节流（每帧的图层之后仍是原字节）。"""
-    return (build_project_prefix(pr.layout.preamble, pr.layout.banks)
+    """把 MfaProject 写回字节流（每帧的图层之后仍是原字节）。
+
+    帧偏移与回程偏移在 MFA 里是**绝对文件偏移**，所以只要前面的段长度变了
+    （比如换了图像库），这两个值就得跟着重算 —— 这里按实际写出的位置重算，
+    而不是照抄读进来的旧值。骨架没改动时算出来与原值相同，回环仍然逐字节相等。
+    """
+    import dataclasses
+
+    head = (build_project_prefix(pr.layout.preamble, pr.layout.banks)
             + build_app_header(pr.layout.app)
-            + build_menu_region(pr.menu)
-            + build_globals(pr.globals)
-            + b"".join(build_frame(f) for f in pr.frames)
+            + build_menu_region(pr.menu))
+    frames = [build_frame(f) for f in pr.frames]
+    pos = len(head) + len(build_globals(pr.globals))
+    offsets = []
+    for blob in frames:
+        offsets.append(pos)
+        pos += len(blob)
+    glob = dataclasses.replace(pr.globals, frame_offsets=offsets,
+                               return_offset=pos)
+    return (head + build_globals(glob) + b"".join(frames)
             + build_chunk_list(pr.chunks))
 
 

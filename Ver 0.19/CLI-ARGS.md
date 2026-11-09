@@ -23,7 +23,8 @@ MultiExtractorCLI.exe [<target>] [选项...]
 | `--no-deep` | 开关 | 关 | 不解容器，仅收集散落文件 |
 | `--keep-work` | 开关 | 关 | 保留 `work/` 中间产物 |
 | `--detect` | 开关 | 关 | 只识别引擎，不提取；需要 `<target>` |
-| `--mfa` | 输出文件路径 | 无 | 用第三方工具把成品导成 `.mfa`（需要 `ME_MFA_TOOL` 或 `--mfa-tool`）；需要 `<target>` |
+| `--mfa` | 输出文件路径 | 无 | 把成品导成 `.mfa`：给了骨架就走自研转换，否则走第三方工具；需要 `<target>` |
+| `--mfa-template` | MFA 路径 | `ME_MFA_TEMPLATE` | 自研转换的骨架 mfa；资源级产物（图像 + 工程名），帧是骨架空帧 |
 | `--mfa-tool` | 工具路径 | `ME_MFA_TOOL` | 第三方 mfa 导出工具；参数模板见 `ME_MFA_TOOL_ARGS`（默认 `{in} {out}`） |
 | `--rebuild` | 开关 | 关 | 全量重建 GameMaker 容器（不等长），写 `<名字>_rebuilt.win` |
 | `--repair` | 开关 | 关 | 只重建 GameMaker 容器，写 `<名字>_rebuilt.win`，不提取 |
