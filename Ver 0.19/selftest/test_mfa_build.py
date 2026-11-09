@@ -124,10 +124,19 @@ def test_end_to_end():
         check([f.handle for f in pr.frames] == list(range(len(pr.frames))),
               "帧句柄是 0..N-1")
         check(pr.frames[0].width > 0, "帧还在（尺寸取自骨架）")
-        w, h = mfa_build.read_ccn_app(sample)
+        info = mfa_build.read_ccn_app(sample)
+        w, h = info.width, info.height
         check(0 < w <= 16384 and 0 < h <= 16384,
               f"应用窗口尺寸读出来了 {w}x{h}", f"{w}x{h}")
         check((rep.width, rep.height) == (w, h), "报告里的尺寸与之一致")
+        check(info.fps == 60, f"帧率读出来 {info.fps}", f"{info.fps}")
+        check(info.frames == len(rep.frame_names),
+              f"应用头帧数 {info.frames} 与帧名个数一致",
+              f"{info.frames} vs {len(rep.frame_names)}")
+        check(pr.layout.app.frame_rate == 60, "mfa 里的帧率也写成 60",
+              f"{pr.layout.app.frame_rate}")
+        check((pr.layout.app.width, pr.layout.app.height) == (w, h),
+              "mfa 里的窗口尺寸与成品一致")
         check(pr.frames[0].width == w and pr.frames[0].height == h,
               "帧尺寸取应用窗口", f"{pr.frames[0].width}x{pr.frames[0].height}")
         check(pr.frames[0].last_x == w // 2 and pr.frames[0].last_y == h // 2,

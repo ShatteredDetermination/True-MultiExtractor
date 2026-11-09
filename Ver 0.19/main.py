@@ -825,6 +825,8 @@ def cmd_mfa(target, args) -> int:
             ui.ok(f"已导出 mfa（资源级）: {rep.out}（{rep.out_size:,} B）")
             ui.detail(rep.summary())
             ui.detail(f"工程名: {rep.app_name!r}")
+            if rep.fps:
+                ui.detail(f"帧率 {rep.fps}，应用头写 {rep.app_frames} 帧")
             if rep.objects:
                 kinds = " / ".join(f"类型 {k}×{v}"
                                   for k, v in list(rep.object_types.items())[:3])

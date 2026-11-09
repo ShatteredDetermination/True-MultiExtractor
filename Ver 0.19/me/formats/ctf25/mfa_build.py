@@ -52,6 +52,8 @@ class BuildReport:
     object_headers_size: int = 0
     width: int = 0
     height: int = 0
+    fps: int = 0
+    app_frames: int = 0
     out_size: int = 0
     notes: List[str] = field(default_factory=list)
 
@@ -168,12 +170,23 @@ def read_ccn_frames(ccn_path):
         mm.close()
 
 
-def read_ccn_app(ccn_path):
-    """读成品的应用头（0x2223）里的窗口宽高。
+@dataclass
+class CcnAppInfo:
+    """成品应用头（0x2223，112 B）里已确认的字段。"""
+    width: int = 0
+    height: int = 0
+    frames: int = 0
+    fps: int = 0
 
-    布局实测（dtlg-v1.1.0.exe）：``u32 长度 / u32 版本 / u32 flags /
-    u16 宽 / u16 高 / ...``，宽高在偏移 12 与 14（640x480 就是
-    ``80 02 e0 01``）。只取这两个 u16，别的字段不猜。
+
+def read_ccn_app(ccn_path) -> CcnAppInfo:
+    """读成品的应用头（0x2223）。
+
+    实测布局（dtlg-v1.1.0.exe，112 B）：
+    ``u32 长度 / u32 版本 / u32 flags / u16 宽 / u16 高 / …(边框尺寸等)… /
+    +100 i32 帧数 / +104 i32 帧率 / +108 i32 256``。
+    交叉验证：+100 读出 31，正好等于 ``0x3333`` 帧容器数量、也等于帧名个数；
+    +104 读出 60，和 Fusion 工程的默认帧率量级一致。其余字段不猜。
     """
     import struct
 
@@ -183,16 +196,23 @@ def read_ccn_app(ccn_path):
     try:
         buf = mm.mm
         chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        info = CcnAppInfo()
         ch = chunk_mod.find(chs, 0x2223)
         if ch is None:
-            return 0, 0
+            return info
         data = chunk_mod.load(buf, ch)
         if len(data) < 16:
-            return 0, 0
+            return info
         width, height = struct.unpack_from("<HH", data, 12)
-        if not (0 < width <= 16384 and 0 < height <= 16384):
-            return 0, 0
-        return width, height
+        if 0 < width <= 16384 and 0 < height <= 16384:
+            info.width, info.height = width, height
+        if len(data) >= 108:
+            frames, fps = struct.unpack_from("<ii", data, 100)
+            if 0 < frames <= 65535:
+                info.frames = frames
+            if 0 < fps <= 1000:
+                info.fps = fps
+        return info
     finally:
         mm.close()
 
@@ -309,7 +329,13 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
             names = []
             rep.notes.append(f"帧名读不出来：{exc}")
         try:
-            rep.width, rep.height = read_ccn_app(ccn_path)
+            app = read_ccn_app(ccn_path)
+            rep.width, rep.height = app.width, app.height
+            rep.fps = app.fps
+            rep.app_frames = app.frames
+            if app.frames and names and app.frames != len(names):
+                rep.notes.append(f"应用头写 {app.frames} 帧，实际读到 "
+                                 f"{len(names)} 帧")
         except Exception as exc:
             rep.notes.append(f"应用尺寸读不出来：{exc}")
         if names:
@@ -343,6 +369,10 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
         rep.notes.append(f"对象名读不出来：{exc}")
 
     app = pr.layout.app
+    if rep.width and rep.height:
+        app.width, app.height = rep.width, rep.height
+    if rep.fps:
+        app.frame_rate = rep.fps
     if rep.app_name:
         app.app_name = rep.app_name
         pr.layout.preamble.app_name = rep.app_name   # 前段里的工程名也一起换
