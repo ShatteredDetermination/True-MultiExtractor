@@ -122,6 +122,14 @@ def test_end_to_end():
         check([f.handle for f in pr.frames] == list(range(len(pr.frames))),
               "帧句柄是 0..N-1")
         check(pr.frames[0].width > 0, "帧还在（尺寸取自骨架）")
+        w, h = mfa_build.read_ccn_app(sample)
+        check(0 < w <= 16384 and 0 < h <= 16384,
+              f"应用窗口尺寸读出来了 {w}x{h}", f"{w}x{h}")
+        check((rep.width, rep.height) == (w, h), "报告里的尺寸与之一致")
+        check(pr.frames[0].width == w and pr.frames[0].height == h,
+              "帧尺寸取应用窗口", f"{pr.frames[0].width}x{pr.frames[0].height}")
+        check(pr.frames[0].last_x == w // 2 and pr.frames[0].last_y == h // 2,
+              "最后查看点落在画面中心")
         src, _, total = mfa_build.read_ccn_assets(sample, LIMIT)
         entries = None
         try:

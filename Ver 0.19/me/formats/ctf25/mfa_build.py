@@ -46,6 +46,8 @@ class BuildReport:
     images_skipped: int = 0
     frames: int = 0
     frame_names: List[str] = field(default_factory=list)
+    width: int = 0
+    height: int = 0
     out_size: int = 0
     notes: List[str] = field(default_factory=list)
 
@@ -162,6 +164,35 @@ def read_ccn_frames(ccn_path):
         mm.close()
 
 
+def read_ccn_app(ccn_path):
+    """读成品的应用头（0x2223）里的窗口宽高。
+
+    布局实测（dtlg-v1.1.0.exe）：``u32 长度 / u32 版本 / u32 flags /
+    u16 宽 / u16 高 / ...``，宽高在偏移 12 与 14（640x480 就是
+    ``80 02 e0 01``）。只取这两个 u16，别的字段不猜。
+    """
+    import struct
+
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        ch = chunk_mod.find(chs, 0x2223)
+        if ch is None:
+            return 0, 0
+        data = chunk_mod.load(buf, ch)
+        if len(data) < 16:
+            return 0, 0
+        width, height = struct.unpack_from("<HH", data, 12)
+        if not (0 < width <= 16384 and 0 < height <= 16384):
+            return 0, 0
+        return width, height
+    finally:
+        mm.close()
+
+
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                    limit: Optional[int] = None, frame_names: bool = True,
                    progress: Optional[Callable] = None) -> BuildReport:
@@ -200,6 +231,10 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
         except Exception as exc:
             names = []
             rep.notes.append(f"帧名读不出来：{exc}")
+        try:
+            rep.width, rep.height = read_ccn_app(ccn_path)
+        except Exception as exc:
+            rep.notes.append(f"应用尺寸读不出来：{exc}")
         if names:
             import copy
             base = pr.frames[0]
@@ -208,10 +243,17 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 f = copy.deepcopy(base)
                 f.handle = i
                 f.name = nm or f"Frame {i + 1}"
+                if rep.width and rep.height:
+                    f.width, f.height = rep.width, rep.height
+                    f.last_x, f.last_y = rep.width // 2, rep.height // 2
                 pr.frames.append(f)
             rep.frame_names = [f.name for f in pr.frames]
-            rep.notes.append("帧名来自成品；帧的尺寸/背景/图层仍是骨架自带的"
-                             "（成品帧头是 flag=3 加密块，暂时读不出宽高）")
+            if rep.width and rep.height:
+                rep.notes.append(
+                    f"帧尺寸取应用窗口 {rep.width}x{rep.height}"
+                    "（成品帧头是 flag=3 加密块，逐帧宽高读不出）")
+            else:
+                rep.notes.append("帧尺寸取骨架；成品帧头是 flag=3 加密块")
     rep.frames = len(pr.frames)
 
     app = pr.layout.app
