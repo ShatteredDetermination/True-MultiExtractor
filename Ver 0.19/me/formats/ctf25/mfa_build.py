@@ -50,6 +50,8 @@ class BuildReport:
     object_names: List[str] = field(default_factory=list)
     object_types: dict = field(default_factory=dict)
     object_headers_size: int = 0
+    sounds_total: int = 0
+    sounds_written: int = 0
     width: int = 0
     height: int = 0
     fps: int = 0
@@ -58,8 +60,10 @@ class BuildReport:
     notes: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
+        sounds = (f"{self.sounds_written}/{self.sounds_total} 段音频，"
+                  if self.sounds_total else "")
         return (f"{self.images_written}/{self.images_total} 张图像，"
-                f"{self.frames} 帧，{self.out_size:,} B → {self.out}")
+                f"{sounds}{self.frames} 帧，{self.out_size:,} B → {self.out}")
 
 
 def _rgba_to_bgra(rgba: bytes) -> bytes:
@@ -289,6 +293,53 @@ def read_ccn_objects(ccn_path) -> CcnObjectTable:
         mm.close()
 
 
+def read_ccn_sounds(ccn_path, limit: Optional[int] = None):
+    """读成品里的音频条目（0x2250 之类，走现成的 soundbank 解析）。"""
+    from me.formats.ctf25 import soundbank
+    from me.formats.ctf25.extractor import _is_25plus
+
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        ch = chunk_mod.find(chs, ids.CHUNK_SOUNDS)
+        if ch is None:
+            return []
+        data = chunk_mod.load(buf, ch)
+        try:
+            entries = list(soundbank.parse_sounds(data, _is_25plus(chs)))
+        except Exception:
+            entries = list(soundbank.parse_sounds(data, False))
+        return entries[:limit] if limit else entries
+    finally:
+        mm.close()
+
+
+def wav_frequency(data: bytes) -> int:
+    """从 WAV 头里取采样率；不是 WAV 就返回 0（不瞎填）。"""
+    if len(data) < 28 or data[:4] not in (b"RIFF", b"RIFX"):
+        return 0
+    import struct
+    rate = struct.unpack_from("<I", data, 24)[0]
+    return rate if 0 < rate <= 384000 else 0
+
+
+def to_mfa_sound(entry) -> mfa.SoundEntry:
+    """把成品的一条音频转成 MFA 音频条目（频率只认 WAV 头，其余留 0）。"""
+    return mfa.SoundEntry(
+        handle=entry.handle,
+        checksum=entry.checksum,
+        references=entry.references,
+        data_size=len(entry.data),
+        flags=0,
+        frequency=wav_frequency(entry.data),
+        name=entry.name,
+        data=entry.data,
+    )
+
+
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                    limit: Optional[int] = None, frame_names: bool = True,
                    progress: Optional[Callable] = None) -> BuildReport:
@@ -321,6 +372,19 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     bank.count = len(bank.entries)
     bank.graphic_mode = 8
     pr.globals.graphic_mode = 8      # 与图像库保持一致，否则体检会报不一致
+
+    try:
+        sounds = read_ccn_sounds(ccn_path, limit)
+        rep.sounds_total = len(sounds)
+        pr.layout.banks.sounds = []
+        for entry in sounds:
+            try:
+                pr.layout.banks.sounds.append(to_mfa_sound(entry))
+                rep.sounds_written += 1
+            except Exception as exc:
+                rep.notes.append(f"音频 #{entry.handle} 跳过：{exc}")
+    except Exception as exc:
+        rep.notes.append(f"音频读不出来：{exc}")
 
     if frame_names:
         try:

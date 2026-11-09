@@ -75,6 +75,33 @@ def test_convert_image():
     check(img.handle == 7 and img.references == 1, "句柄与引用数照写")
 
 
+def test_sounds():
+    section("1b. 音频转换")
+    wav = (b"RIFF" + b"\x00" * 16 + b"\x00\x00\x00\x00"
+           + struct_pack_u32(44100))
+    check(mfa_build.wav_frequency(wav) == 44100, "WAV 采样率读得出来")
+    check(mfa_build.wav_frequency(b"OggS" + b"\x00" * 40) == 0,
+          "不是 WAV 时不瞎填频率")
+    check(mfa_build.wav_frequency(b"RIFF") == 0, "过短不崩")
+
+    class E:
+        handle = 3
+        checksum = 7
+        references = 2
+        name = "beep"
+        data = wav
+
+    s = mfa_build.to_mfa_sound(E())
+    check(s.handle == 3 and s.frequency == 44100 and s.name == "beep",
+          "音频条目字段映射")
+    check(s.data_size == len(wav) and s.data == wav, "音频数据原样带上")
+
+
+def struct_pack_u32(v: int) -> bytes:
+    import struct
+    return struct.pack("<I", v)
+
+
 def test_errors():
     section("2. 失败路径")
     for kwargs, what in (
@@ -141,6 +168,15 @@ def test_end_to_end():
               "帧尺寸取应用窗口", f"{pr.frames[0].width}x{pr.frames[0].height}")
         check(pr.frames[0].last_x == w // 2 and pr.frames[0].last_y == h // 2,
               "最后查看点落在画面中心")
+        check(len(pr.layout.banks.sounds) == rep.sounds_written > 0,
+              f"音频带上 {rep.sounds_written} 条",
+              f"{len(pr.layout.banks.sounds)}")
+        src_sounds = mfa_build.read_ccn_sounds(sample, LIMIT)
+        check([s.name for s in pr.layout.banks.sounds]
+              == [s.name for s in src_sounds], "音频名字与成品一致")
+        check(all(a.data == b.data for a, b in
+                  zip(pr.layout.banks.sounds, src_sounds)),
+              "音频数据与成品逐字节一致")
 
         table = mfa_build.read_ccn_objects(sample)
         objs, hsize = table.names, table.headers_size
@@ -189,6 +225,7 @@ def main() -> int:
     print("  CCN -> MFA 骨架级转换自测")
     print("=" * 66)
     test_convert_image()
+    test_sounds()
     test_errors()
     test_end_to_end()
     print("\n" + "=" * 66)

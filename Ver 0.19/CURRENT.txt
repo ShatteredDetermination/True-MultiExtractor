@@ -1780,3 +1780,27 @@ CLI-ARGS.md（--mfa 改写、新增 --mfa-template）、ROADMAP（新增两行�
 MFA 里帧率写成 60、MFA 里窗口尺寸与成品一致。全过（44 PASS / 0 FAIL）。
 
 按用户要求：只单跑 test_mfa_build.py 与一次 CLI，没跑全量。
+
+=== 2026-11-09（第 16 轮 / 0.19WIP Beta 00112）音频库也带上了：172 段 ===
+
+1）新增 mfa_build.read_ccn_sounds() / to_mfa_sound() / wav_frequency()
+   - 音频走现成的 me/formats/ctf25/soundbank.py 解析（成品 2.5+ 与老格式都试）
+   - MFA 音频条目的 handle/checksum/references/name/data 直接映射；
+     **频率只从 WAV 头（偏移 24 的 u32）取**，不是 WAV 就留 0 —— 不瞎填
+   - flags 写成 0（MFA 侧的 flags 语义还没对照过，不猜）
+
+2）实测（dtlg-v1.1.0.exe）
+   成品里 172 段音频，全部带上；名字与数据逐字节一致。
+   产物从 7,136,264 B 长到 **138,121,790 B**（音频是原样数据，必然变大），
+   --mfa-check 仍然「结构自洽」——说明写到这么大、这么多条目，偏移重算也没歪。
+
+3）汇总行改了
+   BuildReport.summary() 现在会带音频：「1515/1515 张图像，172/172 段音频，31 帧，…」。
+
+自测：test_mfa_build.py 44 -> 52 项
+  新增第 1b 段「音频转换」：WAV 采样率读得出、非 WAV 不瞎填、过短不崩、
+  字段映射、数据原样带上；
+  端到端新增：音频条数 = sounds_written > 0、名字与成品一致、数据逐字节一致。
+  全过（52 PASS / 0 FAIL）。
+
+按用户要求：只单跑 test_mfa_build.py 与两次 CLI，没跑全量。
