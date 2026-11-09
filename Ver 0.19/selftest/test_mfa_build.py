@@ -112,7 +112,16 @@ def test_end_to_end():
         pr = mfa.read_project(out.read_bytes())
         check(pr.layout.banks.images.count == LIMIT, "读回来图像张数一致",
               f"{pr.layout.banks.images.count}")
-        check(pr.frames and pr.frames[0].width > 0, "帧还在（骨架自带）")
+        check(len(pr.frames) == rep.frames > 1, f"帧数来自成品（{rep.frames} 帧）",
+              f"{len(pr.frames)}")
+        names = mfa_build.read_ccn_frames(sample)
+        check(rep.frame_names == names, "帧名与成品里的一致",
+              f"{rep.frame_names[:2]} vs {names[:2]}")
+        check(pr.frames[0].name == (names[0] or "Frame 1"),
+              f"第一帧叫 {names[0]!r}", repr(pr.frames[0].name))
+        check([f.handle for f in pr.frames] == list(range(len(pr.frames))),
+              "帧句柄是 0..N-1")
+        check(pr.frames[0].width > 0, "帧还在（尺寸取自骨架）")
         src, _, total = mfa_build.read_ccn_assets(sample, LIMIT)
         entries = None
         try:

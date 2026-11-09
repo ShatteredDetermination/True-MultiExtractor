@@ -45,6 +45,7 @@ class BuildReport:
     images_written: int = 0
     images_skipped: int = 0
     frames: int = 0
+    frame_names: List[str] = field(default_factory=list)
     out_size: int = 0
     notes: List[str] = field(default_factory=list)
 
@@ -128,8 +129,41 @@ def to_mfa_image(entry) -> mfa.MfaImage:
     )
 
 
+def read_ccn_frames(ccn_path):
+    """读成品里每帧的**帧名**（0x3335 是普通 zlib chunk，读得出来）。
+
+    帧头（0x3334）在 2.5+ 里是 flag=3（zlib + 加密），数据是异或过的，
+    所以宽高/背景色现在读不出来 —— 这里只返回名字，不猜尺寸。
+    """
+    out = []
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        for frame in chs:
+            if frame.id != 0x3333:
+                continue
+            name = ""
+            try:
+                sub = chunk_mod.scan(buf, frame.data_offset,
+                                     frame.data_offset + frame.size)
+                name_chunk = chunk_mod.find(sub, 0x3335)
+                if name_chunk is not None:
+                    data = chunk_mod.load(buf, name_chunk)
+                    name = data.decode("utf-16-le" if loc.unicode else "latin-1",
+                                       "ignore").rstrip("\x00")
+            except Exception:
+                name = ""
+            out.append(name)
+        return out
+    finally:
+        mm.close()
+
+
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
-                   limit: Optional[int] = None,
+                   limit: Optional[int] = None, frame_names: bool = True,
                    progress: Optional[Callable] = None) -> BuildReport:
     """骨架级转换：应用信息 + 图像库 从成品搬进骨架，写出 ``out_path``。"""
     template_path = Path(template_path) if template_path else DEFAULT_TEMPLATE
@@ -159,6 +193,25 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
             progress(i + 1, len(entries))
     bank.count = len(bank.entries)
     bank.graphic_mode = 8
+
+    if frame_names:
+        try:
+            names = read_ccn_frames(ccn_path)
+        except Exception as exc:
+            names = []
+            rep.notes.append(f"帧名读不出来：{exc}")
+        if names:
+            import copy
+            base = pr.frames[0]
+            pr.frames = []
+            for i, nm in enumerate(names):
+                f = copy.deepcopy(base)
+                f.handle = i
+                f.name = nm or f"Frame {i + 1}"
+                pr.frames.append(f)
+            rep.frame_names = [f.name for f in pr.frames]
+            rep.notes.append("帧名来自成品；帧的尺寸/背景/图层仍是骨架自带的"
+                             "（成品帧头是 flag=3 加密块，暂时读不出宽高）")
     rep.frames = len(pr.frames)
 
     app = pr.layout.app

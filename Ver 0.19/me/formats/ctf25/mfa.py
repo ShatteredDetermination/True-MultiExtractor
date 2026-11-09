@@ -1161,7 +1161,10 @@ def build_project(pr: MfaProject) -> bytes:
             + build_app_header(pr.layout.app)
             + build_menu_region(pr.menu))
     frames = [build_frame(f) for f in pr.frames]
-    pos = len(head) + len(build_globals(pr.globals))
+    # 全局量段里装着帧数与帧偏移表，长度随帧数变；先用同样条数的占位表量长度
+    placeholder = dataclasses.replace(
+        pr.globals, frame_offsets=[0] * len(frames), return_offset=0)
+    pos = len(head) + len(build_globals(placeholder))
     offsets = []
     for blob in frames:
         offsets.append(pos)
