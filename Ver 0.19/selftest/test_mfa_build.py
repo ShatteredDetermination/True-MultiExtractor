@@ -28,7 +28,8 @@ FAILURES = []
 TEMPLATE = Path(r"C:\拆包教程素材\Clickteam MFA 样本\Template.mfa")
 CCN_SAMPLES = [
     Path(r"C:\拆包教程素材\目标游戏\dtlg-v1.1.0.exe"),
-    Path(r"C:\拆包教程素材\目标游戏\Undertale Last Breath Scrapped.dat"),
+    Path(r"C:\拆包教程素材\目标游戏\Undertale Last Breath Scrapped BETA"
+         r"\Undertale Last Breath Scrapped.dat"),
 ]
 LIMIT = 8
 
@@ -281,6 +282,33 @@ def test_end_to_end():
         check(total == rep.images_total, "两次统计一致")
 
 
+def test_second_sample():
+    section("4. 第二份成品（.dat 形态）")
+    if not TEMPLATE.is_file():
+        print("  [skip] 骨架 Template.mfa 不在本机")
+        return
+    others = [p for p in CCN_SAMPLES[1:] if p.is_file()]
+    if not others:
+        print("  [skip] 第二份成品不在本机")
+        return
+    sample = others[0]
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "ulb.mfa"
+        rep = mfa_build.build_from_ccn(sample, out, TEMPLATE, limit=16)
+        check(out.is_file() and out.read_bytes()[:4] == b"MFU2",
+              "第二份成品也产出 MFU2")
+        issues = mfa.validate(out.read_bytes())
+        check(issues == [], "第二份产物体检零问题", f"{issues[:3]}")
+        check(bool(rep.app_name), f"读到工程名 {rep.app_name!r}")
+        check(rep.frames > 1 and len(rep.frame_names) == rep.frames,
+              f"帧数与帧名一致（{rep.frames} 帧）")
+        check(rep.width > 0 and rep.height > 0 and rep.fps > 0,
+              f"窗口与帧率读出来 {rep.width}x{rep.height}@{rep.fps}")
+        check(rep.icons >= 1, f"图标 {rep.icons} 个")
+        check(rep.images_written == 16 and rep.sounds_written > 0,
+              f"图像 {rep.images_written}、音频 {rep.sounds_written}")
+
+
 def main() -> int:
     print("=" * 66)
     print("  CCN -> MFA 骨架级转换自测")
@@ -290,6 +318,7 @@ def main() -> int:
     test_fonts()
     test_errors()
     test_end_to_end()
+    test_second_sample()
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}")
     print("=" * 66)
