@@ -130,6 +130,17 @@ def test_end_to_end():
               "帧尺寸取应用窗口", f"{pr.frames[0].width}x{pr.frames[0].height}")
         check(pr.frames[0].last_x == w // 2 and pr.frames[0].last_y == h // 2,
               "最后查看点落在画面中心")
+
+        objs, hsize = mfa_build.read_ccn_objects(sample)
+        check(len(objs) > 10, f"对象名读出来 {len(objs)} 个", f"{len(objs)}")
+        check(objs and objs[0] == "Font Embed Object",
+              f"第一条对象名是 {objs[0]!r}" if objs else "无对象名")
+        check(rep.objects == len(objs) and rep.object_names == objs,
+              "报告里的对象名与重新读的一致")
+        check(hsize > 0 and hsize % len(objs) == 0,
+              f"对象头 {hsize} B 能被对象数整除（记录 {hsize // len(objs)} B）",
+              f"{hsize}/{len(objs)}")
+        check(objs[-1] == "buttons 2", f"最后一条对象名是 {objs[-1]!r}")
         src, _, total = mfa_build.read_ccn_assets(sample, LIMIT)
         entries = None
         try:

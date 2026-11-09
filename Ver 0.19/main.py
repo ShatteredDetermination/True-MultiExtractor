@@ -795,6 +795,9 @@ def cmd_mfa(target, args) -> int:
             ui.ok(f"已导出 mfa（资源级）: {rep.out}（{rep.out_size:,} B）")
             ui.detail(rep.summary())
             ui.detail(f"工程名: {rep.app_name!r}")
+            if rep.objects:
+                ui.detail(f"对象名字 {rep.objects} 个（对象头 {rep.object_headers_size} B，"
+                          f"每条 {rep.object_headers_size // max(rep.objects, 1)} B）")
             for note in rep.notes[:3]:
                 ui.detail(f"跳过: {note}")
             ui.warn("帧内对象与事件还没有重建，帧是骨架自带的空帧；"

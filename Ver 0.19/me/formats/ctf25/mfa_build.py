@@ -46,6 +46,9 @@ class BuildReport:
     images_skipped: int = 0
     frames: int = 0
     frame_names: List[str] = field(default_factory=list)
+    objects: int = 0
+    object_names: List[str] = field(default_factory=list)
+    object_headers_size: int = 0
     width: int = 0
     height: int = 0
     out_size: int = 0
@@ -193,6 +196,38 @@ def read_ccn_app(ccn_path):
         mm.close()
 
 
+def read_ccn_objects(ccn_path):
+    """读成品里的对象名（0x2254）。
+
+    实测布局很简单：**一串以 `00 00` 结尾的 UTF-16LE 字符串**，没有条数前缀，
+    开头就是 `46 00`（'F'）—— 第一条是 "Font Embed Object"，最后一条
+    "buttons 2" 之后直接到块尾。
+
+    对象头（0x2253，13,872 B）的记录长度还不能唯一确定（12 / 24 / 48 都整除），
+    所以这里只返回名字与「对象头字节数」，不猜记录字段。
+    """
+    import struct
+
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
+        names, headers_len = [], 0
+        ch = chunk_mod.find(chs, 0x2254)
+        if ch is not None:
+            data = chunk_mod.load(buf, ch)
+            text = data.decode("utf-16-le", "ignore")
+            names = [p for p in text.split("\x00") if p]
+        hch = chunk_mod.find(chs, 0x2253)
+        if hch is not None:
+            headers_len = len(chunk_mod.load(buf, hch))
+        return names, headers_len
+    finally:
+        mm.close()
+
+
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                    limit: Optional[int] = None, frame_names: bool = True,
                    progress: Optional[Callable] = None) -> BuildReport:
@@ -255,6 +290,12 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
             else:
                 rep.notes.append("帧尺寸取骨架；成品帧头是 flag=3 加密块")
     rep.frames = len(pr.frames)
+
+    try:
+        rep.object_names, rep.object_headers_size = read_ccn_objects(ccn_path)
+        rep.objects = len(rep.object_names)
+    except Exception as exc:
+        rep.notes.append(f"对象名读不出来：{exc}")
 
     app = pr.layout.app
     if rep.app_name:
