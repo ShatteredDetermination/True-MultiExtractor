@@ -1897,3 +1897,32 @@ build_from_ccn 写完 mfa 顺手写清单，命令行打一行「清单: …」�
    全过（76 PASS / 0 FAIL）。
 
 按用户要求：只单跑 test_mfa_build.py 与两次 python 调用，没跑全量。
+
+=== 2026-11-09（第 21 轮 / 0.19WIP Beta 00117）帧内图层拆开，对象数定位到了 ===
+
+1）先排除了一个方向
+   把 Template（0 对象）和 Platformer（有对象）的**全局 chunk 列表**逐条对比：
+   两份完全一样（47 条，id 与长度逐条相同）。结论：对象不在全局列表里，
+   只在各帧帧体里 —— 想重建对象必须进帧体。
+
+2）帧内图层结构定下来了
+   每层 16 B：`CString 名字 + u32 flags + f32 scaleX + f32 scaleY`。
+   证据：Platformer 有 2 层，第 2 层的空名标记 `00 00 00 80` 正好落在 rest+20，
+   而 rest 开头是 4 字节层数 → (20-4)/1 = 16。
+   然后 2 字节转场标志（都是 0），接着 `i32 对象数`：
+     Template  1 层 / flags 1 / **0 对象**
+     Platformer 2 层 / flags 2,1 / **12 对象**
+   这两个数在两份样本上都说得通（Template 没有对象，Platformer 的 12 个对象
+   正好是它关卡里的对象数），而且整份逐字节重建仍然成立、--mfa-check 零问题。
+
+3）MfaFrame 扩展
+   新增 MfaLayer(name/flags/scale_x/scale_y)、MfaFrame.layers / fade_in /
+   fade_out / object_count；read_frame 读到对象数为止，其余（对象记录、文件夹、
+   实例、事件、帧内 chunk 列表）继续按原字节挂在 rest_raw 里：
+   Template 剩 255 B、Platformer 剩 41,298 B。
+
+自测：test_mfa.py 193 -> 198 项，新增：
+  合成帧头回环仍过、Template 1 层/flags 1/0 对象、Platformer 2 层/flags 2,1/12 对象、
+  图层缩放 1.0、转场标志为 0。全过（198 PASS / 0 FAIL）。
+
+按用户要求：只单跑 test_mfa.py，没跑全量。

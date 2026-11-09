@@ -1281,6 +1281,18 @@ def validate(buf: bytes) -> List[str]:
 # **重建**的东西，先别拿原始字节冒充「已解析」。
 
 @dataclass
+class MfaLayer:
+    """帧内一层：名字 + flags + 两个缩放系数（实测每条 16 B）。"""
+    name: str = ""
+    flags: int = 0
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+
+    def __repr__(self) -> str:
+        return f"<Layer {self.name!r} flags={self.flags}>"
+
+
+@dataclass
 class MfaFrame:
     handle: int = 0
     name: str = ""
@@ -1296,10 +1308,15 @@ class MfaFrame:
     palette: List[bytes] = None
     stamp_handle: int = 0
     active_layer: int = 0
-    rest_raw: bytes = b""        # 图层及其后（对象/实例/事件/帧内 chunk）原样
+    layers: List[MfaLayer] = None
+    fade_in: int = 0
+    fade_out: int = 0
+    object_count: int = 0
+    rest_raw: bytes = b""        # 对象记录及其后（文件夹/实例/事件/帧内 chunk）原样
 
     def __post_init__(self):
         self.palette = self.palette if self.palette is not None else []
+        self.layers = self.layers if self.layers is not None else []
 
 
 def read_frame(buf: bytes, start: int, end: int) -> MfaFrame:
@@ -1327,6 +1344,19 @@ def read_frame(buf: bytes, start: int, end: int) -> MfaFrame:
         f.palette.append(r.take(4))
     f.stamp_handle = r.i32()
     f.active_layer = r.i32()
+    n = r.u32()
+    if n > 256:
+        raise MfaError(f"帧 {f.name!r} 的图层数 {n} 异常")
+    for _ in range(n):
+        layer = MfaLayer(name=r.cstring(), flags=r.u32())
+        layer.scale_x = struct.unpack("<f", r.take(4))[0]
+        layer.scale_y = struct.unpack("<f", r.take(4))[0]
+        f.layers.append(layer)
+    f.fade_in = r.take(1)[0]
+    f.fade_out = r.take(1)[0]
+    f.object_count = r.u32()
+    if f.object_count > 65535:
+        raise MfaError(f"帧 {f.name!r} 的对象数 {f.object_count} 异常")
     if not (0 <= f.width <= 65535 and 0 <= f.height <= 65535):
         raise MfaError(f"帧 {f.name!r} 尺寸异常 {f.width}x{f.height}")
     if r.pos > end:
@@ -1354,6 +1384,14 @@ def build_frame(f: MfaFrame) -> bytes:
         w.raw(c)
     w.i32(f.stamp_handle)
     w.i32(f.active_layer)
+    w.u32(len(f.layers))
+    for layer in f.layers:
+        w.cstring(layer.name)
+        w.u32(layer.flags)
+        w.raw(struct.pack("<f", layer.scale_x))
+        w.raw(struct.pack("<f", layer.scale_y))
+    w.raw(bytes((f.fade_in, f.fade_out)))
+    w.u32(f.object_count)
     w.raw(f.rest_raw)
     return w.getvalue()
 
@@ -1361,4 +1399,5 @@ def build_frame(f: MfaFrame) -> bytes:
 def describe_frame(f: MfaFrame) -> str:
     return (f"帧 {f.name!r} {f.width}x{f.height} 背景 {f.background.hex(' ')} "
             f"flags {f.flags:#x} 调色板 {len(f.palette)} 色 图章 {f.stamp_handle} "
-            f"当前层 {f.active_layer} 其余 {len(f.rest_raw)} B 原样")
+            f"当前层 {f.active_layer} 图层 {len(f.layers)} 对象 {f.object_count} "
+            f"其余 {len(f.rest_raw)} B 原样")

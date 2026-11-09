@@ -530,6 +530,22 @@ def test_frames():
               raw[pr.globals.frame_offsets[0]:pr.globals.return_offset],
               f"{p.name} 帧逐字节回写（{len(mfa.build_frame(f))} B）")
         check("帧" in mfa.describe_frame(f), f"{p.name} 帧概况串")
+        if p.name == "Template.mfa":
+            check(len(f.layers) == 1 and f.layers[0].flags == 1
+                  and f.object_count == 0,
+                  "Template 1 层 / flags 1 / 0 对象",
+                  f"{len(f.layers)} {f.layers[0].flags if f.layers else '-'} "
+                  f"{f.object_count}")
+        elif p.name == "Platformer Engine.mfa":
+            check(len(f.layers) == 2
+                  and [ly.flags for ly in f.layers] == [2, 1]
+                  and f.object_count == 12,
+                  "Platformer 2 层 / flags 2,1 / 12 对象",
+                  f"{len(f.layers)} {[ly.flags for ly in f.layers]} "
+                  f"{f.object_count}")
+            check(abs(f.layers[0].scale_x - 1.0) < 1e-6, "图层缩放读成 1.0",
+                  f"{f.layers[0].scale_x}")
+        check(f.fade_in == 0 and f.fade_out == 0, f"{p.name} 转场标志为 0")
 
 
 def test_validate():
