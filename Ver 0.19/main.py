@@ -77,6 +77,8 @@ def _build_parser() -> "_Parser":
                     help="第三方 mfa 导出工具路径（也可用 ME_MFA_TOOL）")
     ap.add_argument("--mfa-template", metavar="PATH",
                     help="自研转换用的骨架 MFA（也可用 ME_MFA_TEMPLATE）")
+    ap.add_argument("--mfa-check", metavar="PATH",
+                    help="只体检一个 .mfa：结构是否自洽（自研/第三方产物都能查）")
     ap.add_argument("--tools", action="store_true", help="检查外部 CLI 是否齐全")
     ap.add_argument("--tools-dir", metavar="DIR",
                     help="指定外部工具根目录（写进 toolsdir.ini，下次生效）")
@@ -142,6 +144,8 @@ def _dispatch(args) -> int:
         return cmd_detect(args.target)
     if args.mfa:
         return cmd_mfa(Path(args.target) if args.target else None, args)
+    if args.mfa_check:
+        return cmd_mfa_check(Path(args.mfa_check))
     if args.rebuild:
         return cmd_rebuild(Path(args.target) if args.target else None, args)
     if args.repair:
@@ -762,6 +766,32 @@ def cmd_setup() -> int:
                 out_root=str(setup_ini.output_root()),
                 error=cfg["error"] or None)
     return config.EXIT_OK
+
+
+def cmd_mfa_check(path: Path) -> int:
+    """体检一份 .mfa 的结构自洽性（不猜，只报事实）。"""
+    from me.formats.ctf25 import mfa
+    if not path.is_file():
+        ui.error(f"文件不存在: {path}")
+        return config.EXIT_TARGET
+    data = path.read_bytes()
+    issues = mfa.validate(data)
+    events.emit("mfa_check", path=str(path), size=len(data), ok=not issues,
+                issues=list(issues))
+    if not issues:
+        try:
+            pr = mfa.read_project(data)
+            ui.ok(f"结构自洽：{path.name}（{len(data):,} B）")
+            ui.detail(mfa.describe_project(pr))
+        except Exception as exc:                  # validate 已过，这里理论上不会
+            ui.warn(f"结构自洽，但概况读不出来：{exc}")
+        return config.EXIT_OK
+    ui.error(f"体检发现 {len(issues)} 个问题：{path.name}")
+    for one in issues[:10]:
+        ui.detail(one)
+    if len(issues) > 10:
+        ui.detail(f"…还有 {len(issues) - 10} 条")
+    return config.EXIT_EMPTY
 
 
 def cmd_mfa(target, args) -> int:

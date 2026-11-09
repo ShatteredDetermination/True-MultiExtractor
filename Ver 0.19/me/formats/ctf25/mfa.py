@@ -1186,6 +1186,87 @@ def describe_project(pr: MfaProject) -> str:
             f"chunk {len(pr.chunks.chunks)} 条")
 
 
+# ------------------------------------------------------------------ 结构体检
+# 给任意 .mfa 做「结构自洽」检查（自研产物与第三方产物都能查）。规则都来自
+# 两份真样本上验证过的事实，不是凭感觉写的；最后一条是整份逐字节回环 ——
+# 通过了就等于「这份文件我们能完整读写，没有猜出来的字节」。
+
+VALID_VERSIONS = (6, 7)
+
+
+def validate(buf: bytes) -> List[str]:
+    """返回问题清单；空列表表示结构自洽。不抛异常。"""
+    issues: List[str] = []
+    if len(buf) < 8:
+        return [f"文件只有 {len(buf)} B，连 MFU2 头都不够"]
+    if buf[:4] != MAGIC:
+        return [f"不是 MFA：开头是 {buf[:4]!r}，应为 {MAGIC!r}"]
+
+    try:
+        pr = read_project(buf)
+    except MfaError as exc:
+        return [f"解析失败：{exc}"]
+
+    pre = pr.layout.preamble
+    if pre.version not in VALID_VERSIONS:
+        issues.append(f"MFU2 版本 {pre.version} 不在已知范围 {VALID_VERSIONS}")
+    if not pre.app_name:
+        issues.append("工程名为空")
+    if not pre.thumbnail:
+        issues.append("没有缩略图")
+
+    bank = pr.layout.banks.images
+    if bank.count != len(bank.entries):
+        issues.append(f"图像库头写 {bank.count} 条，实际读出 "
+                      f"{len(bank.entries)} 条")
+    icons = pr.layout.banks.icons
+    if icons.count != len(icons.entries):
+        issues.append(f"图标库头写 {icons.count} 条，实际读出 "
+                      f"{len(icons.entries)} 条")
+    for i, img in enumerate(bank.entries):
+        if img.width <= 0 or img.height <= 0:
+            issues.append(f"图像 #{i} 尺寸异常 {img.width}x{img.height}")
+        elif img.decl_size < img.width * img.height:
+            issues.append(f"图像 #{i} 解压数据比像素数还少")
+
+    app = pr.layout.app
+    if not (0 < app.width <= 16384 and 0 < app.height <= 16384):
+        issues.append(f"应用窗口尺寸异常 {app.width}x{app.height}")
+    if app.frame_rate <= 0 or app.frame_rate > 1000:
+        issues.append(f"帧率异常 {app.frame_rate}")
+
+    if pr.globals.graphic_mode != bank.graphic_mode:
+        issues.append(f"全局图形模式 {pr.globals.graphic_mode} 与图像库 "
+                      f"{bank.graphic_mode} 不一致")
+
+    offsets = pr.globals.frame_offsets
+    if not offsets:
+        issues.append("没有帧")
+    elif offsets != sorted(offsets):
+        issues.append("帧偏移不是递增的")
+    for i, f in enumerate(pr.frames):
+        if not f.name:
+            issues.append(f"第 {i + 1} 帧没有名字")
+        if not (0 < f.width <= 65535 and 0 < f.height <= 65535):
+            issues.append(f"第 {i + 1} 帧尺寸异常 {f.width}x{f.height}")
+        if len(f.palette) not in (0, 256):
+            issues.append(f"第 {i + 1} 帧调色板 {len(f.palette)} 色（应是 256）")
+
+    if not pr.chunks.chunks:
+        issues.append("对象 chunk 列表是空的")
+    if not pr.chunks.terminated:
+        issues.append("对象 chunk 列表没有收尾字节")
+
+    try:
+        rebuilt = build_project(pr)
+    except MfaError as exc:
+        issues.append(f"重建失败：{exc}")
+    else:
+        if rebuilt != buf:
+            issues.append(f"重建出来 {len(rebuilt)} B，与原文 {len(buf)} B 不等")
+    return issues
+
+
 # -------------------------------------------------------------------- 帧（头部）
 # 每帧的开头按 CTFAK Frame.Write 的顺序，与两份样本逐字段对得上：
 #

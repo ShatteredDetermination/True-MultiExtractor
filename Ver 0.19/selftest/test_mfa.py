@@ -532,6 +532,36 @@ def test_frames():
         check("帧" in mfa.describe_frame(f), f"{p.name} 帧概况串")
 
 
+def test_validate():
+    section("13. 结构体检")
+    present = [p for p in SAMPLES if p.is_file()]
+    for bad, what in ((b"", "空文件要报问题"),
+                      (b"NOPE" + b"\x00" * 16, "魔数不对要报问题"),
+                      (b"MFU2\x06\x00\x00\x00" + b"\x00" * 8, "截断要报解析失败")):
+        issues = mfa.validate(bad)
+        check(bool(issues), what, f"{issues[:1]}")
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    for p in present:
+        raw = p.read_bytes()
+        issues = mfa.validate(raw)
+        check(issues == [], f"{p.name} 两份真样本体检零问题", f"{issues[:3]}")
+        # 直接把图像库头里的条数改大 1：解析会当场对不上，应被抓出来
+        pr = mfa.read_project(raw)
+        bad = bytearray(raw)
+        off = pr.layout.banks.images.entries_offset - 4
+        bad[off] = (bad[off] + 1) & 0xFF
+        issues = mfa.validate(bytes(bad))
+        check(bool(issues), f"{p.name} 条数对不上要被抓出来", f"{issues[:2]}")
+        # 改坏帧名：应报「第 1 帧没有名字」
+        pr2 = mfa.read_project(raw)
+        pr2.frames[0].name = ""
+        issues = mfa.validate(mfa.build_project(pr2))
+        check(any("没有名字" in s for s in issues),
+              f"{p.name} 帧名为空要被抓住", f"{issues[:2]}")
+
+
 def main() -> int:
     print("=" * 66)
     print("  MFA 前段与资源库自测")
@@ -548,6 +578,7 @@ def main() -> int:
     test_chunks()
     test_project()
     test_frames()
+    test_validate()
 
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}  SKIP {SKIPPED}")

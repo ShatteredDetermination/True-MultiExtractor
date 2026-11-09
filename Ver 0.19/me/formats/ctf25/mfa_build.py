@@ -300,6 +300,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
             progress(i + 1, len(entries))
     bank.count = len(bank.entries)
     bank.graphic_mode = 8
+    pr.globals.graphic_mode = 8      # 与图像库保持一致，否则体检会报不一致
 
     if frame_names:
         try:
@@ -344,6 +345,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     app = pr.layout.app
     if rep.app_name:
         app.app_name = rep.app_name
+        pr.layout.preamble.app_name = rep.app_name   # 前段里的工程名也一起换
     if rep.author:
         app.author = rep.author
     if rep.copyright:

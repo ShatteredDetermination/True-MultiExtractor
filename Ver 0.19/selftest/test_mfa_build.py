@@ -104,6 +104,8 @@ def test_end_to_end():
         rep = mfa_build.build_from_ccn(sample, out, TEMPLATE, limit=LIMIT)
         check(out.is_file() and out.read_bytes()[:4] == b"MFU2",
               "产物是 MFU2 开头")
+        issues = mfa.validate(out.read_bytes())
+        check(issues == [], "产物结构体检零问题", f"{issues[:3]}")
         check(rep.images_written == LIMIT and not rep.images_skipped,
               f"写入 {LIMIT} 张、没跳过", f"{rep.images_written} 跳过 {rep.images_skipped}")
         check(rep.out_size == out.stat().st_size, "报告里的体积与文件一致")
