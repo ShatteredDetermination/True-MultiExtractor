@@ -131,16 +131,33 @@ def test_end_to_end():
         check(pr.frames[0].last_x == w // 2 and pr.frames[0].last_y == h // 2,
               "最后查看点落在画面中心")
 
-        objs, hsize = mfa_build.read_ccn_objects(sample)
+        table = mfa_build.read_ccn_objects(sample)
+        objs, hsize = table.names, table.headers_size
         check(len(objs) > 10, f"对象名读出来 {len(objs)} 个", f"{len(objs)}")
         check(objs and objs[0] == "Font Embed Object",
               f"第一条对象名是 {objs[0]!r}" if objs else "无对象名")
-        check(rep.objects == len(objs) and rep.object_names == objs,
+        check(rep.objects == len(table.objects) and rep.object_names == objs,
               "报告里的对象名与重新读的一致")
         check(hsize > 0 and hsize % len(objs) == 0,
               f"对象头 {hsize} B 能被对象数整除（记录 {hsize // len(objs)} B）",
               f"{hsize}/{len(objs)}")
         check(objs[-1] == "buttons 2", f"最后一条对象名是 {objs[-1]!r}")
+        check(len(table.objects) == len(objs), "每条对象记录都解出来了",
+              f"{len(table.objects)} vs {len(objs)}")
+        check([o.index for o in table.objects] == list(range(len(objs))),
+              "对象记录序号是 0..N-1")
+        by_name = {o.name: o for o in table.objects}
+        check(by_name.get("text") is not None
+              and by_name["text"].type_id == 2,
+              "名字 text 的类型号是 2",
+              f"{by_name.get('text')}")
+        check(by_name.get("counter") is not None
+              and by_name["counter"].type_id == 7,
+              "名字 counter 的类型号是 7", f"{by_name.get('counter')}")
+        check(len(table.type_counts()) == 21, "类型号共 21 种",
+              f"{len(table.type_counts())}")
+        check(rep.object_types and max(rep.object_types.values()) >= 100,
+              f"报告里带上类型分布 {rep.object_types}")
         src, _, total = mfa_build.read_ccn_assets(sample, LIMIT)
         entries = None
         try:

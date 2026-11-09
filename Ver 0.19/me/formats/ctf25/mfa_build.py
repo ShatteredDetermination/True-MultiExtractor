@@ -48,6 +48,7 @@ class BuildReport:
     frame_names: List[str] = field(default_factory=list)
     objects: int = 0
     object_names: List[str] = field(default_factory=list)
+    object_types: dict = field(default_factory=dict)
     object_headers_size: int = 0
     width: int = 0
     height: int = 0
@@ -196,34 +197,74 @@ def read_ccn_app(ccn_path):
         mm.close()
 
 
-def read_ccn_objects(ccn_path):
-    """读成品里的对象名（0x2254）。
+@dataclass
+class CcnObject:
+    """成品里的一个对象：16 B 记录里已确认的字段 + 原始字节。"""
+    index: int = 0
+    type_id: int = 0
+    flag: int = 0
+    rest: bytes = b""
+    name: str = ""
 
-    实测布局很简单：**一串以 `00 00` 结尾的 UTF-16LE 字符串**，没有条数前缀，
-    开头就是 `46 00`（'F'）—— 第一条是 "Font Embed Object"，最后一条
-    "buttons 2" 之后直接到块尾。
+    def __repr__(self) -> str:
+        return f"<Obj #{self.index} type={self.type_id} {self.name!r}>"
 
-    对象头（0x2253，13,872 B）的记录长度还不能唯一确定（12 / 24 / 48 都整除），
-    所以这里只返回名字与「对象头字节数」，不猜记录字段。
+
+@dataclass
+class CcnObjectTable:
+    names: List[str] = field(default_factory=list)
+    objects: List[CcnObject] = field(default_factory=list)
+    headers_size: int = 0
+
+    def type_counts(self):
+        from collections import Counter
+        return Counter(o.type_id for o in self.objects)
+
+
+def parse_object_record(rec: bytes, name: str = "") -> CcnObject:
+    """解一条 16 B 对象记录。
+
+    已确认（有交叉验证的）：``u16 序号`` + ``u16 类型号`` + ``u16 标志``。
+    其余 10 字节照原样留在 ``rest`` 里 —— 字段含义还没定，不编。
+    证据：867 条记录的序号正好是 0..866；类型号只有 21 种取值，
+    其中 ``text`` 是 2、``counter`` 是 7、``Font Embed Object`` 是 32（≥32 是扩展）。
     """
     import struct
 
+    if len(rec) < 16:
+        raise MfaBuildError(f"对象记录只有 {len(rec)} B，应为 16 B")
+    index, type_id, flag = struct.unpack_from("<HHH", rec, 0)
+    return CcnObject(index=index, type_id=type_id, flag=flag,
+                     rest=rec[6:16], name=name)
+
+
+def read_ccn_objects(ccn_path) -> CcnObjectTable:
+    """读成品里的对象名（0x2254）与对象记录（0x2253）。
+
+    对象名就是**一串以 ``00 00`` 收尾的 UTF-16LE 字符串**，没有条数前缀。
+    对象记录 16 B 一条，条数 = 对象名个数（dtlg：867 条 / 13,872 B）。
+    """
     mm, loc = container.open_file(ccn_path)
     if loc is None:
         raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
     try:
         buf = mm.mm
         chs = chunk_mod.scan(buf, loc.chunk_start, len(buf))
-        names, headers_len = [], 0
+        table = CcnObjectTable()
         ch = chunk_mod.find(chs, 0x2254)
         if ch is not None:
-            data = chunk_mod.load(buf, ch)
-            text = data.decode("utf-16-le", "ignore")
-            names = [p for p in text.split("\x00") if p]
+            text = chunk_mod.load(buf, ch).decode("utf-16-le", "ignore")
+            table.names = [p for p in text.split("\x00") if p]
         hch = chunk_mod.find(chs, 0x2253)
         if hch is not None:
-            headers_len = len(chunk_mod.load(buf, hch))
-        return names, headers_len
+            raw = chunk_mod.load(buf, hch)
+            table.headers_size = len(raw)
+            count = len(raw) // 16
+            for i in range(count):
+                rec = raw[i * 16:(i + 1) * 16]
+                nm = table.names[i] if i < len(table.names) else ""
+                table.objects.append(parse_object_record(rec, nm))
+        return table
     finally:
         mm.close()
 
@@ -292,8 +333,11 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     rep.frames = len(pr.frames)
 
     try:
-        rep.object_names, rep.object_headers_size = read_ccn_objects(ccn_path)
-        rep.objects = len(rep.object_names)
+        table = read_ccn_objects(ccn_path)
+        rep.object_names = list(table.names)
+        rep.objects = len(table.objects) or len(table.names)
+        rep.object_headers_size = table.headers_size
+        rep.object_types = dict(table.type_counts().most_common(5))
     except Exception as exc:
         rep.notes.append(f"对象名读不出来：{exc}")
 
