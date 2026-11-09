@@ -546,6 +546,12 @@ def test_frames():
             check(abs(f.layers[0].scale_x - 1.0) < 1e-6, "图层缩放读成 1.0",
                   f"{f.layers[0].scale_x}")
         check(f.fade_in == 0 and f.fade_out == 0, f"{p.name} 转场标志为 0")
+        if p.name == "Platformer Engine.mfa":
+            names = mfa.extract_strings(f.rest_raw)
+            check("Enemy" in names, "帧体里捞到对象名 Enemy", f"{names[:4]}")
+            check("Jump Strength" in names,
+                  "帧体里捞到可改变量名 Jump Strength", f"{names[:6]}")
+            check(len(names) >= 8, f"帧体里一共捞到 {len(names)} 个名字")
 
 
 def test_validate():

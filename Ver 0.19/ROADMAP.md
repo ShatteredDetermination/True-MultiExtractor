@@ -26,6 +26,7 @@ MFA 是 `MFU2` 头 + 工程字符串 + 缩略图 + 四个资源库 + 应用设�
 | 帧头部 | `MfaFrame` / `read_frame` / `build_frame` / `describe_frame`：句柄、帧名、宽高、背景色、帧 flags、最大对象数、密码、未知串、最后查看 X/Y、256 色调色板、图章句柄、当前图层；**图层及之后仍是原字节** |
 | 自研骨架转换 | `mfa_build.py` + CLI `--mfa-template`：拿骨架 MFA，把成品的工程名 / 作者 / 版权与整库图像搬进去，写前自检（`read_project` 能读回）；RGBA → BGRA、zlib、`graphic_mode=8`；实测 `dtlg-v1.1.0.exe` → 1,515/1,515 张图像、7,094,120 B、4 秒 |
 | 帧数与帧名 | `read_ccn_frames()`：成品每帧的 `0x3335` 帧名块是普通 zlib 块，读得出来；转换时按它克隆骨架帧并改名。实测 `dtlg-v1.1.0.exe` → 31 帧、首帧 `start`、输出 7,136,234 B |
+| 帧体里的名字（旁证） | `extract_strings()`：不假设字段位置，只在帧体字节流里按「u32 长度 + 高位标记 + UTF-16」扫 CString。Platformer 帧体里捞到 `Enemy`、`Moving`、`Current Gravity`、`Max Gravity`、`Jump Strength`、`Perfected Double Jumps` 等 —— 说明对象记录里带着对象名与可改变量名，**但记录长度可变**，字段顺序仍未定，所以只当旁证，不拿来写 MFA |
 | 帧内图层 + 对象数 | 每层 16 B：`CString 名字 + u32 flags + f32 scaleX + f32 scaleY`，之后 2 字节转场标志、`i32 对象数`。实证：Platformer 第 2 层的空名正好落在 +20，于是层长 16；据此算出的对象数是 Template **0** / Platformer **12**，两边都说得通。两份样本整份逐字节重建仍然成立 |
 | 全局 chunk 列表与对象无关 | 两份样本的全局 chunk 列表**完全一样**（47 条、id 与长度逐条相同），说明对象不在全局列表里，只在各帧帧体内 —— 重建对象必须进帧体 |
 | 第二份成品验证 | 转换器在 `.dat` 形态的 `Undertale Last Breath Scrapped.dat`（66 MB）上跑通：工程名 `Undertale Last Breath - [Scrapped]`、640x480@60、13 帧、275 个对象、2,138 张图像、5 个字体、1 个图标，`--mfa-check` 零问题 —— 说明不是只对 dtlg 一份样本过拟合 |

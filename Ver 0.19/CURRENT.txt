@@ -1926,3 +1926,23 @@ build_from_ccn 写完 mfa 顺手写清单，命令行打一行「清单: …」�
   图层缩放 1.0、转场标志为 0。全过（198 PASS / 0 FAIL）。
 
 按用户要求：只单跑 test_mfa.py，没跑全量。
+
+=== 2026-11-09（第 22 轮 / 0.19WIP Beta 00118）帧体里的名字能捞出来了（只当旁证） ===
+
+1）看了 Platformer 帧体内 12 条对象记录的开头
+   能直接读出这些 UTF-16 名字：Enemy / Moving / Current Gravity / Max Gravity /
+   Gravity Force / Jump Strength / Perfected Double Jumps …
+   说明对象记录里嵌着「对象名 + 动画/属性名 + 可改变量名」，而且**长度可变**，
+   字段顺序还没定死。这一轮不硬猜结构，先做能验证的事。
+
+2）新增 mfa.extract_strings(body)
+   不假设任何字段位置，只在字节流里按「u32 长度 + 0x80000000 高位 + UTF-16」扫 CString，
+   扫到就收、跳过乱码、去重、上限 200 条。
+   它的可信点是编码对得上（不是瞎猜位置），限制是「捞到名字 ≠ 帧结构已解析」——
+   文档里也这么写。
+
+3）自测：test_mfa.py 198 -> 201 项，新增：
+   Platformer 帧体里能捞到 'Enemy'、能捞到 'Jump Strength'、名字至少 8 个。
+   全过（201 PASS / 0 FAIL）。
+
+按用户要求：只单跑 test_mfa.py，没跑全量。

@@ -1401,3 +1401,37 @@ def describe_frame(f: MfaFrame) -> str:
             f"flags {f.flags:#x} 调色板 {len(f.palette)} 色 图章 {f.stamp_handle} "
             f"当前层 {f.active_layer} 图层 {len(f.layers)} 对象 {f.object_count} "
             f"其余 {len(f.rest_raw)} B 原样")
+
+
+def extract_strings(body: bytes, min_chars: int = 3, limit: int = 200) -> List[str]:
+    """把一段字节里「看起来是 CString 的 UTF-16 文本」都捞出来。
+
+    帧体（对象记录、文件夹、实例、事件）里混着不少名字：对象名、动画名、
+    可改变量名，全用同一种 CString 编码。这里只做**无损旁证**：不假设字段位置，
+    只在字节流里按「u32 长度 + 高位标记 + UTF-16」扫，遇到就收，其余跳过。
+    所以它捞出来的东西可信（编码对得上），但**不代表帧结构已解析**。
+    """
+    out: List[str] = []
+    seen = set()
+    i = 0
+    n = len(body)
+    while i + 4 <= n:
+        v = struct.unpack_from("<I", body, i)[0]
+        if v & 0x80000000:
+            chars = v & 0x7FFFFFFF
+            if min_chars <= chars <= 512 and i + 4 + chars * 2 <= n:
+                raw = body[i + 4:i + 4 + chars * 2]
+                try:
+                    text = raw.decode("utf-16-le")
+                except UnicodeDecodeError:
+                    text = ""
+                if text and all(32 <= ord(c) <= 0x2FFF or c in "\t\n" for c in text):
+                    if text not in seen:
+                        seen.add(text)
+                        out.append(text)
+                        if len(out) >= limit:
+                            return out
+                    i += 4 + chars * 2
+                    continue
+        i += 2
+    return out
