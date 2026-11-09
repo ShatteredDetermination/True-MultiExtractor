@@ -1831,3 +1831,18 @@ MFA 里帧率写成 60、MFA 里窗口尺寸与成品一致。全过（44 PASS /
   字高都为负。全过（59 PASS / 0 FAIL）。
 
 按用户要求：只单跑 test_mfa_build.py 与 CLI，没跑全量。
+
+=== 第 18 轮补记（0.19WIP Beta 00114）伴随清单 ===
+
+mfa_build.write_manifest() -> <名字>.mfa.json，内容：
+  source/template/mfa 路径、app（名字/作者/版权/宽高/帧率/声明帧数）、
+  counts（图像/音频/字体/帧/对象，各带 written）、frames（31 个帧名）、
+  object_types、objects（867 条 index/name/type/flag）、notes、
+  not_reconstructed（明确写「帧内图层/实例/事件」与「对象还没写进 MFA」）。
+build_from_ccn 写完 mfa 顺手写清单，命令行打一行「清单: …」。
+
+图标块 0x2235 这轮只拆了一半：decl 1352 B、头 40 B（40/16/16/01 00 08 00），
+后面 1312 B 是位图样数据，字段没定死，所以**没往 mfa 里写**，图标仍用骨架的 12 个。
+
+自测：test_mfa_build.py 59 -> 65 项（清单存在/可解析/字段对得上/带全帧名与对象表/
+写明未重建项），全过。
