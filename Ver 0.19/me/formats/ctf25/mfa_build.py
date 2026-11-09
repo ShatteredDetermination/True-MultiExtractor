@@ -59,6 +59,7 @@ class BuildReport:
     fps: int = 0
     app_frames: int = 0
     out_size: int = 0
+    manifest: str = ""
     notes: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -344,6 +345,53 @@ def to_mfa_sound(entry) -> mfa.SoundEntry:
     )
 
 
+def write_manifest(path, rep: "BuildReport", table=None) -> str:
+    """把「从成品读到了什么」写成 JSON 清单，落在 mfa 旁边。
+
+    这不是 mfa 的一部分，是给人/给后续工具看的清单：工程名、窗口、帧率、
+    帧名、对象名与类型、各库条数，以及所有「跳过 / 没做到」的说明。
+    帧内布局与事件还没重建，清单里也会写明。
+    """
+    import json
+
+    data = {
+        "source": rep.ccn,
+        "template": rep.template,
+        "mfa": rep.out,
+        "app": {
+            "name": rep.app_name,
+            "author": rep.author,
+            "copyright": rep.copyright,
+            "width": rep.width,
+            "height": rep.height,
+            "fps": rep.fps,
+            "frames_declared": rep.app_frames,
+        },
+        "counts": {
+            "images": rep.images_total,
+            "images_written": rep.images_written,
+            "sounds": rep.sounds_total,
+            "sounds_written": rep.sounds_written,
+            "fonts": rep.fonts_total,
+            "fonts_written": rep.fonts_written,
+            "frames": rep.frames,
+            "objects": rep.objects,
+        },
+        "frames": list(rep.frame_names),
+        "object_types": {str(k): v for k, v in (rep.object_types or {}).items()},
+        "objects": ([{"index": o.index, "name": o.name, "type": o.type_id,
+                      "flag": o.flag} for o in table.objects] if table else []),
+        "notes": list(rep.notes),
+        "not_reconstructed": [
+            "帧内图层 / 对象实例 / 事件（成品帧头是 flag=3 加密块）",
+            "对象仍未写进 MFA 的对象 chunk 列表",
+        ],
+    }
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    Path(path).write_text(text, encoding="utf-8")
+    return str(path)
+
+
 def read_ccn_fonts(ccn_path):
     """读成品的字体：元数据（0x2246 之类）+ 内嵌 TTF。
 
@@ -501,6 +549,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 rep.notes.append("帧尺寸取骨架；成品帧头是 flag=3 加密块")
     rep.frames = len(pr.frames)
 
+    table = None
     try:
         table = read_ccn_objects(ccn_path)
         rep.object_names = list(table.names)
@@ -530,4 +579,8 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     out.write_bytes(data)
     rep.out = str(out)
     rep.out_size = len(data)
+    try:
+        rep.manifest = write_manifest(str(out) + ".json", rep, table)
+    except Exception as exc:
+        rep.notes.append(f"清单写不出来：{exc}")
     return rep

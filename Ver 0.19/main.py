@@ -836,6 +836,8 @@ def cmd_mfa(target, args) -> int:
                           + (f"；{kinds}" if kinds else ""))
             for note in rep.notes[:3]:
                 ui.detail(f"跳过: {note}")
+            if rep.manifest:
+                ui.detail(f"清单: {rep.manifest}")
             ui.warn("帧内对象与事件还没有重建，帧是骨架自带的空帧；"
                     "原游戏布局不会出现在这份 mfa 里。")
             events.emit("mfa", ok=True, channel="self", reason="ok",

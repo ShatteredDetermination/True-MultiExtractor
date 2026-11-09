@@ -213,6 +213,21 @@ def test_end_to_end():
         check(all(f.height < 0 for f in pr.layout.banks.fonts),
               "字高都按负值写")
 
+        import json
+        man = Path(rep.manifest)
+        check(man.is_file() and man.name.endswith(".mfa.json"),
+              f"清单写在旁边 {man.name if man else ''}")
+        doc = json.loads(man.read_text(encoding="utf-8"))
+        check(doc["app"]["name"] == rep.app_name, "清单里的工程名对得上")
+        check(doc["counts"]["frames"] == rep.frames
+              and doc["counts"]["objects"] == rep.objects,
+              "清单里的帧数/对象数对得上")
+        check(len(doc["frames"]) == rep.frames and len(doc["objects"]) == rep.objects,
+              "清单里带全帧名与对象表")
+        check(doc["objects"][0]["name"] == "Font Embed Object",
+              "清单第一条对象是 Font Embed Object")
+        check(doc["not_reconstructed"], "清单写明哪部分没重建")
+
         table = mfa_build.read_ccn_objects(sample)
         objs, hsize = table.names, table.headers_size
         check(len(objs) > 10, f"对象名读出来 {len(objs)} 个", f"{len(objs)}")
