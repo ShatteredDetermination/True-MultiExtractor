@@ -2031,3 +2031,32 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
   test_mfa_build.py     82 项 / 4 段 全过（新增 6 项：31/31 帧头、帧尺寸、矩形、滚动区、图层名、三层那帧）
 中途修掉一个自己写出来的 bug：payloads.get() 返回 None 时 _parse_frame_header 里 len(None) 崩，
 被上层 try 吞掉 → 第二份样本退化成 1 帧。加了 None 保护后恢复 13 帧，这条也进了测试。
+
+------------------------------------------------------------
+0.19WIP Beta 00121（第 25 轮）：实例块 0x3338 拆开，1,562 条对象摆位进清单
+
+1）0x3338 的布局定下来了（有据可查，不是猜）：
+   u32 条数 + 每条 20 B（u16 对象下标 / u16 序号 / i32 x / i32 y / u32 未知 / u32 图层）
+   + 末尾 4 B 校验；长度校验：88 = 4 + 4×20 + 4，308 = 4 + 15×20 + 4，都对得上。
+   对象下标和 0x2253 对象表一一对应：'start' 帧四条分别是 Ini / Discord Rich Presence /
+   textbox string / Font Embed Object；坐标有负值（贴边摆放），图层号在
+   'dtlg team presents' 那帧落在 0/1/2，正好对应它那三个图层。
+
+2）代码：
+   - CcnInstance + _parse_frame_instances()，接进 read_ccn_frames_info()
+     （可选 objects_by_index，不传就自己读对象表）；
+   - BuildReport 增 instances_by_frame / frame_instances / instances_total，
+     notes 写明「实例已进清单、还没写进 MFA 帧体」；
+   - .mfa.json 增 instances（帧 → 对象名/类型/x/y/图层），超过 4,000 条只给条数并标 truncated。
+
+3）实测 dtlg-v1.1.0.exe：31 帧共 1,562 条实例，对象名 0 条空（201 个不同对象），
+   坐标都在合理范围；产物仍是结构自洽的 mfa（validate 零问题）。
+   第二份样本密钥对不上 → 实例也读不出，照旧兜底。
+
+4）自测（单跑）：
+   test_crypto.py     47 项全过（新增：实例块 count=4、首条对象 1 @ (-38,5)、块长 = 4+20N+4）
+   test_mfa_build.py  88 项全过（新增 6 项：总数与逐帧一致、第一帧 4 条、
+                      首条 = Ini @ (-38,5) 图层 0、对象名全对上、三层那帧分布 0/1/2、坐标范围）
+
+下一步：写 MFA 对象定义（CObjectInfo + 各类型加载器）→ 再把实例写进帧体；
+那之后 mfa 里才真正「有布局」。仍等用户在 Fusion 2.5 里打开演示 mfa 的结果。

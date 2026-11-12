@@ -52,6 +52,9 @@ class BuildReport:
     frame_layers: List[List[Tuple[str, int, float, float]]] = field(
         default_factory=list)
     frame_rects: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    instances_by_frame: List[int] = field(default_factory=list)
+    frame_instances: List[List["CcnInstance"]] = field(default_factory=list)
+    instances_total: int = 0
     frames_decoded: int = 0
     objects: int = 0
     object_names: List[str] = field(default_factory=list)
@@ -203,7 +206,27 @@ class CcnFrameInfo:
     flags: int = 0
     rect: Tuple[int, int, int, int] = (0, 0, 0, 0)
     layers: List[Tuple[str, int, float, float]] = field(default_factory=list)
+    instances: List["CcnInstance"] = field(default_factory=list)
     decoded: bool = False
+
+
+@dataclass
+class CcnInstance:
+    """成品里的一条实例（帧内 0x3338 块）。
+
+    记录 20 B：``u16 对象下标 / u16 序号 / i32 x / i32 y / u32 未知 / u32 图层``，
+    末尾还有 4 B 校验。对象下标对得上 0x2253 对象表里的序号（实测 867 条全对得上，
+    名字也说得通：`Ini`、`Font Embed Object`、`textbox string`…）。
+    """
+
+    obj_index: int = 0
+    order: int = 0
+    x: int = 0
+    y: int = 0
+    unk: int = 0
+    layer: int = 0
+    object_name: str = ""
+    object_type: int = 0
 
 
 def _chunk_text(buf, ch, unicode_mode) -> str:
@@ -258,8 +281,32 @@ def _parse_frame_layers(data):
     return out
 
 
-def read_ccn_frames_info(ccn_path):
-    """一次扫描读出所有帧：帧名 + 帧头 + 虚拟矩形 + 图层，外加解密密钥来源。"""
+def _parse_frame_instances(data, objects_by_index=None):
+    """0x3338：u32 条数 + 每条 20 B + 4 B 校验。"""
+    if not data or len(data) < 4:
+        return []
+    count = struct.unpack_from("<I", data, 0)[0]
+    if not (0 <= count <= 100000) or len(data) < 4 + count * 20:
+        return []
+    objects_by_index = objects_by_index or {}
+    out = []
+    for i in range(count):
+        idx, order, x, y, unk, layer = struct.unpack_from(
+            "<HHiiII", data, 4 + i * 20)
+        obj = objects_by_index.get(idx)
+        out.append(CcnInstance(
+            obj_index=idx, order=order, x=x, y=y, unk=unk, layer=layer,
+            object_name=(obj[1] if obj else ""),
+            object_type=(obj[0] if obj else 0)))
+    return out
+
+
+def read_ccn_frames_info(ccn_path, objects_by_index=None):
+    """一次扫描读出所有帧：帧名 + 帧头 + 虚拟矩形 + 图层 + 实例，外加解密密钥来源。
+
+    ``objects_by_index`` 是 ``{对象下标: (类型, 名字)}``，用来把实例里的对象下标
+    翻成名字；不传就自己读一遍对象表（0x2253 / 0x2254）。
+    """
     mm, loc = container.open_file(ccn_path)
     if loc is None:
         raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
@@ -275,6 +322,14 @@ def read_ccn_frames_info(ccn_path):
             elif ch.id == ids.CHUNK_FRAME:
                 frame_chunks.append(ch)
 
+        if objects_by_index is None:
+            try:
+                table = read_ccn_objects(ccn_path)
+                objects_by_index = {o.index: (o.type_id, o.name)
+                                    for o in table.objects}
+            except Exception:
+                objects_by_index = {}
+
         key = crypto.app_key(app_name, editor)
         infos = []
         for frame in frame_chunks:
@@ -286,7 +341,8 @@ def read_ccn_frames_info(ccn_path):
                     info.name = _chunk_text(buf, s, loc.unicode)
                 elif s.flag == 3 and s.id in (ids.CHUNK_FRAME_HEADER,
                                               ids.CHUNK_FRAME_LAYERS,
-                                              ids.CHUNK_FRAME_RECT):
+                                              ids.CHUNK_FRAME_RECT,
+                                              ids.CHUNK_FRAME_INSTANCES):
                     body = buf[s.data_offset:s.data_offset + s.size]
                     try:
                         info_decl, data = crypto.decrypt_chunk_body(
@@ -304,6 +360,8 @@ def read_ccn_frames_info(ccn_path):
                 info.rect = rect
             info.layers = _parse_frame_layers(
                 payloads.get(ids.CHUNK_FRAME_LAYERS, b""))
+            info.instances = _parse_frame_instances(
+                payloads.get(ids.CHUNK_FRAME_INSTANCES), objects_by_index)
             infos.append(info)
         return infos
     finally:
@@ -537,6 +595,33 @@ def to_mfa_icon(icon) -> mfa.MfaImage:
     )
 
 
+INSTANCE_CAP = 4000
+
+
+def _manifest_instances(rep: "BuildReport", cap: int = INSTANCE_CAP):
+    """实例明细：帧名 + 每条的对象名/类型/x/y/图层。
+
+    超过 ``cap`` 条就只给条数，并在文本里写明截断 —— 清单是给人看的，
+    不该因为一个上万实例的成品膨胀成几十兆。
+    """
+    total = sum(len(items) for items in rep.frame_instances)
+    if total > cap:
+        return {"truncated": True, "total": total,
+                "frames": [{"frame": name, "count": len(items)}
+                           for name, items in zip(rep.frame_names,
+                                                  rep.frame_instances)]}
+    out = []
+    for name, items in zip(rep.frame_names, rep.frame_instances):
+        out.append({
+            "frame": name,
+            "count": len(items),
+            "items": [{"object": it.object_name, "type": it.object_type,
+                       "x": it.x, "y": it.y, "layer": it.layer}
+                      for it in items],
+        })
+    return {"truncated": False, "total": total, "frames": out}
+
+
 def write_manifest(path, rep: "BuildReport", table=None) -> str:
     """把「从成品读到了什么」写成 JSON 清单，落在 mfa 旁边。
 
@@ -572,6 +657,8 @@ def write_manifest(path, rep: "BuildReport", table=None) -> str:
         "frames": list(rep.frame_names),
         "frame_sizes": [list(sz) for sz in rep.frame_sizes],
         "frame_rects": [list(r) for r in rep.frame_rects],
+        "instances_total": rep.instances_total,
+        "instances": _manifest_instances(rep),
         "frame_layers": [
             [{"name": name, "flags": flags, "scale_x": round(sx, 4),
               "scale_y": round(sy, 4)}
@@ -765,11 +852,18 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 rep.frame_sizes.append((f.width, f.height))
                 rep.frame_layers.append(list(info.layers))
                 rep.frame_rects.append(tuple(info.rect))
+                rep.instances_by_frame.append(len(info.instances))
+                rep.frame_instances.append(list(info.instances))
+                rep.instances_total += len(info.instances)
             rep.frame_names = [f.name for f in pr.frames]
             if rep.frames_decoded:
                 rep.notes.append(
                     f"帧头解密成功 {rep.frames_decoded}/{len(pr.frames)} 帧，"
                     "尺寸与图层按帧头（密钥 = 应用名 + 编辑器工程路径）")
+            if rep.instances_total:
+                rep.notes.append(
+                    f"实例读到 {rep.instances_total} 条（对象下标 + x/y + 图层），"
+                    "已写进清单；还没写进 MFA 的帧体")
             if rep.frames_decoded < len(pr.frames):
                 missing = len(pr.frames) - rep.frames_decoded
                 rep.notes.append(

@@ -221,6 +221,15 @@ def test_samples():
             if len(header) >= 8:
                 w, h = struct.unpack_from("<II", header, 0)
                 check((w, h) == (640, 480), "帧头宽高 = 640x480", f"{w}x{h}")
+            inst = payloads.get(0x3338, b"")
+            if len(inst) >= 24:
+                count = struct.unpack_from("<I", inst, 0)[0]
+                check(count == 4, "实例块 count = 4", str(count))
+                idx, order, x, y = struct.unpack_from("<HHii", inst, 4)
+                check((idx, x, y) == (1, -38, 5),
+                      "首条实例 = 对象 1 @ (-38, 5)", f"{idx} {x} {y}")
+                check(len(inst) == 4 + count * 20 + 4,
+                      "实例块 = 头 4 + 20×N + 校验 4", f"{len(inst)} B")
             layers = payloads.get(0x3341, b"")
             check(b"L\x00a\x00y\x00e\x00r\x00 \x001\x00" in layers,
                   "图层块里有 'Layer 1'", f"{len(layers)} B")

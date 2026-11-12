@@ -207,6 +207,24 @@ def test_end_to_end():
               "第一帧图层名 = Layer 1", f"{rep.frame_layers[0]}")
         check(len(rep.frame_layers[2]) == 3,
               "第 3 帧有 3 层（Main / Effects / Top）", f"{rep.frame_layers[2]}")
+        check(rep.instances_total == sum(rep.instances_by_frame) > 1000,
+              f"实例总数 {rep.instances_total} 条，逐帧加起来对得上",
+              f"{rep.instances_by_frame[:5]}")
+        check(rep.instances_by_frame[0] == 4,
+              "第一帧 4 条实例", f"{rep.instances_by_frame[0]}")
+        first = rep.frame_instances[0]
+        check(first and first[0].object_name == "Ini"
+              and (first[0].x, first[0].y, first[0].layer) == (-38, 5, 0),
+              "首条实例 = Ini @ (-38, 5) 图层 0",
+              f"{(first[0].object_name, first[0].x, first[0].y) if first else None}")
+        check(all(it.object_name for items in rep.frame_instances for it in items),
+              "1562 条实例的对象名全部对上了对象表")
+        check({it.layer for it in rep.frame_instances[2]} == {0, 1, 2},
+              "三层那帧的实例分布在 0/1/2 三层",
+              f"{sorted({it.layer for it in rep.frame_instances[2]})}")
+        check(all(abs(it.x) < 20000 and abs(it.y) < 20000
+                  for items in rep.frame_instances for it in items),
+              "实例坐标都在合理范围")
         check(len(pr.layout.banks.sounds) == rep.sounds_written > 0,
               f"音频带上 {rep.sounds_written} 条",
               f"{len(pr.layout.banks.sounds)}")

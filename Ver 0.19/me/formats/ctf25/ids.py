@@ -91,6 +91,7 @@ CHUNK_APP_TARGET = 8751        # 0x222F 上次构建的目标文件路径
 CHUNK_FRAME = 13107            # 0x3333 帧容器
 CHUNK_FRAME_HEADER = 13108     # 0x3334 帧头（flag=3）
 CHUNK_FRAME_NAME = 13109       # 0x3335 帧名
+CHUNK_FRAME_INSTANCES = 13112  # 0x3338 实例（flag=3）
 CHUNK_FRAME_LAYERS = 13121     # 0x3341 图层（flag=3）
 CHUNK_FRAME_RECT = 13122       # 0x3342 编辑器里的虚拟矩形（flag=3）
 CHUNK_25_OBJECT_HEADERS = 8787   # 0x2253 出现即说明是 2.5+
