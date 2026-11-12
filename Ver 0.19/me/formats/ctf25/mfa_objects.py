@@ -198,3 +198,29 @@ def build_frame_rest(blobs, handles, inst_blobs, events_raw, chunks_raw):
     w.raw(events_raw)
     w.raw(chunks_raw)
     return w.getvalue()
+
+
+def add_objects_to_frame(frame, specs):
+    """往 ``MfaFrame`` 里塞对象与实例，返回 ``(写了几个, 跳过了几个)``。
+
+    ``specs`` 是 ``[(类型, 句柄, 名字, x, y, 图层)]``。只写支持的类型
+    （2/3/7），扩展对象跳过。帧体里的对象列表 / 文件夹 / 实例列表会重建，
+    事件段与帧尾 chunk 列表（含虚拟矩形）保持原样。
+    """
+    events_raw, chunks_raw = split_rest(frame.rest_raw)
+    blobs = []
+    handles = []
+    inst_blobs = []
+    skipped = 0
+    for type_id, handle, name, x, y, layer in specs:
+        blob = build_object_info(type_id, handle, name)
+        if blob is None:
+            skipped += 1
+            continue
+        blobs.append(blob)
+        handles.append(handle)
+        inst_blobs.append(build_instance(handle, x, y, layer, len(inst_blobs)))
+    frame.rest_raw = build_frame_rest(blobs, handles, inst_blobs,
+                                      events_raw, chunks_raw)
+    frame.object_count = len(blobs)
+    return len(blobs), skipped

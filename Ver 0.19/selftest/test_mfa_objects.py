@@ -109,6 +109,35 @@ def test_instances():
     check(rest.endswith(b"EV\x21"), "事件段与帧尾 chunk 原样接在后面")
 
 
+def test_inject():
+    section("2b. 往模板帧里塞对象（最小测试件）")
+    if not TEMPLATE.is_file():
+        print("  [skip] 骨架不在本机")
+        return
+    raw = TEMPLATE.read_bytes()
+    pr = mfa.read_project(raw)
+    f = pr.frames[0]
+    rect_before = mfa.frame_rect(f.rest_raw)
+    wrote, skipped = mfa_objects.add_objects_to_frame(f, [
+        (2, 0, "TestActive", 100, 120, 0),
+        (3, 1, "TestString", 320, 240, 0),
+        (7, 2, "TestCounter", 500, 300, 0),
+        (33, 3, "Unsupported", 0, 0, 0),
+    ])
+    check(wrote == 3 and skipped == 1, "写 3 个、跳过 1 个扩展对象",
+          f"{wrote}/{skipped}")
+    check(f.object_count == 3, "帧头对象数 = 3", str(f.object_count))
+    check(mfa.frame_rect(f.rest_raw) == rect_before, "虚拟矩形保持不变",
+          str(mfa.frame_rect(f.rest_raw)))
+    data = mfa.build_project(pr)
+    check(mfa.validate(data) == [], "产物结构体检零问题")
+    pr2 = mfa.read_project(data)
+    check(pr2.frames[0].object_count == 3, "读回来还是 3 个对象",
+          str(pr2.frames[0].object_count))
+    check(mfa.frame_rect(pr2.frames[0].rest_raw) == rect_before,
+          "读回来矩形也还在")
+
+
 def test_split():
     section("3. 模板帧体拆段")
     if not TEMPLATE.is_file():
@@ -162,6 +191,7 @@ def main():
     print("=" * 66)
     test_object_info()
     test_instances()
+    test_inject()
     test_split()
     test_end_to_end()
     print("\n" + "=" * 66)

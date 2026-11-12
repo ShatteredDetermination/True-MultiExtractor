@@ -29,6 +29,18 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTal
 | 滚动区 | **已按成品写入**（帧尾虚拟矩形）：多数帧就是 640×480，`flash warning` 是 1280×960、`dtlg team presents` 是 840×680 |
 | 图层 | **已按成品写入**：31 帧共 39 层，多数是 `Layer 1`，`dtlg team presents` 是 `Main` / `Effects` / `Top` 三层（缩放都是 1.0） |
 
+## 二号测试件（只测「对象」这一层）
+
+```
+C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\min-object.mfa
+（194,433 B；模板 + 3 个占位对象 + 3 条实例，帧名 Object Test）
+```
+
+如果一号件能打开、二号件打不开，问题就在「对象 / 实例」这层（占位对象只有类型 / 名字 /
+图标，加载器是空壳）；反过来都打不开，问题在更外层的容器或资源库。
+这个文件就是 `mfa_objects.add_objects_to_frame()` 把 3 个对象塞进 `Template.mfa` 的产物
+（Active / String / Counter 各一个，实例分别摆在 100,120 / 320,240 / 500,300）。
+
 ## 请回报的三件事
 
 1. **能不能打开**（打开时如果弹错误框，请把框里的文字发我）；
