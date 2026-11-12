@@ -7,7 +7,7 @@
 
 ```
 C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTale-demo.mfa
-（17,617,903 B；同目录还有 DustTale-demo.mfa.json 清单）
+（17,618,543 B；同目录还有 DustTale-demo.mfa.json 清单）
 ```
 
 来源：`dtlg-v1.1.0.exe`（144 MB）→ 自研通道导出，图像限 32 张、音频 32 段，
@@ -26,7 +26,8 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTal
 | 字体（Fonts） | 17 条（其中 10 条带内嵌 TTF） |
 | 图标（Icons） | 1 张 16×16（来自原游戏） |
 | 帧内内容 | **空**：没有对象、没有实例、没有事件。所以每个帧是空白画面，尺寸 640×480 |
-| 滚动区 | **已按成品写入**（帧尾虚拟矩形）：多数帧就是 640×480，lash warning 是 1280×960、dtlg team presents 是 840×680 |
+| 滚动区 | **已按成品写入**（帧尾虚拟矩形）：多数帧就是 640×480，`flash warning` 是 1280×960、`dtlg team presents` 是 840×680 |
+| 图层 | **已按成品写入**：31 帧共 39 层，多数是 `Layer 1`，`dtlg team presents` 是 `Main` / `Effects` / `Top` 三层（缩放都是 1.0） |
 
 ## 请回报的三件事
 
@@ -43,6 +44,7 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTal
 
 - 图像条目我按 32 位（`graphicMode=8`、BGRA）写，Fusion 对某些模式可能有额外要求；
 - 图标库只有 1 张 16×16，模板原本是 12 张（16/32/48 多尺寸），Fusion 可能期望多尺寸；
-- 帧体里的「非对象段」是从模板 `Template.mfa` 原样搬的（图层 1 层、无对象、事件为空）。
+- 帧体里的「非对象段」是从模板 `Template.mfa` 原样搬的（无对象、事件为空）；
+- 图层 flags 统一写了 1（=可见）：成品那一格读出来是 0，含义还没定，这是可能与成品不一致的地方。
 
 发版前要把这份文档删掉 —— 它只是验收用的临时说明。
