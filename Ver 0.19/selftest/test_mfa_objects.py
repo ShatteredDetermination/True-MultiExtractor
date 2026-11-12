@@ -224,6 +224,19 @@ def test_end_to_end():
         check(parsed_instances == rep.instances_written,
               f"独立解析器读回 {parsed_instances} 条实例",
               str(rep.instances_written))
+        counter_objs = []
+        for fr in pr.frames:
+            got = mfa.parse_frame_objects(fr.rest_raw, fr.object_count)
+            counter_objs += [o for o in got["objects"] if o["type"] == 7]
+        check(counter_objs, f"产物里回读到 {len(counter_objs)} 个 Counter")
+        check(all(o["loader"]["display_type"] == 1 for o in counter_objs),
+              "Counter 显示类型都是 1（数字）")
+        with_images = [o for o in counter_objs if o["loader"]["images"]]
+        check(with_images and len(with_images[0]["loader"]["images"]) == 14,
+              "至少一个 Counter 带 14 张数字图",
+              str(len(with_images[0]["loader"]["images"]) if with_images else 0))
+        check(rep.counters_parsed == 25,
+              f"报告里 counters_parsed = {rep.counters_parsed}")
 
 
 def main():

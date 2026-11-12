@@ -2279,3 +2279,31 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
 
 下一步：Counter 外观字段、扩展对象私有段、事件段；然后再谈发版。
 仍等 Fusion 2.5 两个测试件的结果。
+
+------------------------------------------------------------
+0.19WIP Beta 00132（第 34 轮）：Counter 外观读出来了并写进 mfa
+
+1）Counter 数据段（属性头的 data_offset）布局：
+   u32 块长 / u16 宽 / u16 高 / u16 玩家 / u16 显示类型 / u16 数字位 / u16 字体 /
+   u16 数字图数 / u16 图号×N。显示类型 1=数字、4=动画才带图号；2/3（竖条/横条）带形状，
+   没解析、直接跳过（不硬猜）。
+   实测 dtlg：41 个 Counter 里 **25 个**按这套解开 —— 显示类型全是 1、宽 32、
+   每个 14 张数字图（图号 245..258 这种连续段），合计 350 张。
+
+2）代码：
+   - mfa_objects.parse_counter(blob, common)；
+   - build_loader(type 7, counter=...) 把显示类型 / 宽 / 高 / 数字图 / 字体写进 MFA Counter；
+     初始值 / 上下限 / 颜色仍是默认值（值段含义未定，不装懂）；
+   - build_from_ccn 在 objects=True 时读一次 Counter 外观，报告增 counters_parsed。
+
+3）实测（dtlg，limit 图像 4，objects=True）：25 个 Counter 带外观写进产物，
+   独立解析器回读到 95 个 Counter 对象（跨帧），至少一个带 14 张数字图；validate 零问题。
+
+4）自测（单跑）：
+   test_mfa_build.py   120 项全过（新增 1g 段 6 项：25 个解出、5 号显示类型 1、宽 32、
+                       14 张图、图号 245/246/247、合计 350 张）
+   test_mfa_objects.py 61 项全过（新增：回读 Counter、显示类型全 1、至少一个 14 张图、
+                       counters_parsed=25）
+
+下一步：Active 动画（还没对上）、扩展对象私有段、事件段；然后发版前的最后核验。
+仍等 Fusion 2.5 两个测试件的结果。

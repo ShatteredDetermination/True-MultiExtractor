@@ -78,6 +78,35 @@ def parse_object_common(blob):
     }
 
 
+def parse_counter(blob, common):
+    """从 Counter 对象的数据段读外观字段。
+
+    实测布局（dtlg 41 个 Counter 完全一致，只有图号不同）：
+    ``u32 块长 / u16 宽 / u16 高 / u16 玩家 / u16 显示类型 / u16 数字位 /
+    u16 字体 / u16 数字图数 / u16 图号×N``。显示类型 1=数字、4=动画时才带图号数组；
+    2/3（竖条 / 横条）后面接形状结构，这里不解析、返回 None（不硬猜）。
+    """
+    if not blob or not common:
+        return None
+    body = blob[4:]
+    offset = int(common.get("data_offset", 0) or 0)
+    if offset <= 0 or offset + 18 > len(body):
+        return None
+    try:
+        size = struct.unpack_from("<I", body, offset)[0]
+        width, height, player, display, digits, font, count = struct.unpack_from(
+            "<7H", body, offset + 4)
+    except struct.error:
+        return None
+    if display not in (1, 4):
+        return None
+    if count > 1024 or offset + 18 + count * 2 > len(body):
+        return None
+    frames = list(struct.unpack_from("<%dH" % count, body, offset + 18)) if count else []
+    return dict(size=size, width=width, height=height, player=player,
+                display=display, digits=digits, font=font, frames=frames)
+
+
 def loader_flags(common):
     """把 CCN 的对象标志翻成 MFA 加载器的对象标志。
 
@@ -111,7 +140,7 @@ def _loader_base(object_flags, common=None):
     return w.getvalue()
 
 
-def build_loader(type_id, text=None, common=None):
+def build_loader(type_id, text=None, common=None, counter=None):
     """按类型写私有段；不支持的返回 None。
 
     ``text`` 只对 String（类型 3）有意义：写成一段（CString 正文 + u32 flags）。
@@ -143,28 +172,32 @@ def build_loader(type_id, text=None, common=None):
         flags = (loader_flags(common) if common else 0) or \
             (LOADER_FLAG_CREATE_AT_START | LOADER_FLAG_HAS_TEXT)
         body = _loader_base(flags, common)
+        counter = counter or {}
         w = mfa.Writer()
-        w.i32(0)                          # 值
+        w.i32(0)                          # 初始值（成品里那段的含义还没定）
         w.i32(0)                          # 最小
         w.i32(0)                          # 最大
-        w.u32(1)                          # 显示类型：数字
+        w.u32(int(counter.get("display", 1)))    # 显示类型：1 数字 / 4 动画
         w.i32(1)                          # 填充：单色
         w.raw(b"\x00\x00\x00\x00")        # 颜色 1
         w.raw(b"\x00\x00\x00\x00")        # 颜色 2
         w.i32(0)                          # 竖向渐变
         w.i32(0)                          # 条方向
-        w.i32(0)                          # 宽
-        w.i32(0)                          # 高
-        w.u32(0)                          # 0 张图
-        w.u32(0)                          # 字体
+        w.i32(int(counter.get("width", 0)))
+        w.i32(int(counter.get("height", 0)))
+        frames = list(counter.get("frames") or [])
+        w.u32(len(frames))
+        for frame in frames:
+            w.u32(frame)
+        w.u32(int(counter.get("font", 0)))
         return body + w.getvalue()
     return None
 
 
 def build_object_info(type_id, handle, name, icon_handle=0, text=None,
-                      common=None):
+                      common=None, counter=None):
     """一条 CObjectInfo；类型不支持时返回 None。"""
-    loader = build_loader(type_id, text=text, common=common)
+    loader = build_loader(type_id, text=text, common=common, counter=counter)
     if loader is None:
         return None
     w = mfa.Writer()
@@ -224,13 +257,15 @@ def split_rest(rest):
     return rest[8:start], rest[start:]
 
 
-def build_frame_objects(instances, texts=None, commons=None):
+def build_frame_objects(instances, texts=None, commons=None,
+                        counters=None):
     """按一帧的实例表写对象定义与实例，返回 (对象块, 句柄, 实例块, 跳过的实例数)。
 
     ``texts`` 是 ``{对象下标: 正文}``（String 对象用），没有就写空段落。
     """
     texts = texts or {}
     commons = commons or {}
+    counters = counters or {}
     order = []
     seen = set()
     for inst in instances:
@@ -246,7 +281,8 @@ def build_frame_objects(instances, texts=None, commons=None):
         blob = build_object_info(inst.object_type, inst.obj_index,
                                  inst.object_name,
                                  text=texts.get(inst.obj_index),
-                                 common=commons.get(inst.obj_index))
+                                 common=commons.get(inst.obj_index),
+                                 counter=counters.get(inst.obj_index))
         if blob is None:
             continue
         blobs.append(blob)

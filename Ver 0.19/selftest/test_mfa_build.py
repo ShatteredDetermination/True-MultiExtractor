@@ -202,6 +202,37 @@ def test_object_common():
     check(not (flipped & (1 << 18)), "bit18（CCNCheck）被清掉")
 
 
+def test_counters():
+    section("1g. Counter 外观（数据段）")
+    sample = next((p for p in CCN_SAMPLES if p.is_file()), None)
+    if sample is None:
+        print("  [skip] 成品样本不在本机")
+        return
+    from me.formats.ctf25 import mfa_objects
+
+    table = mfa_build.read_ccn_objects(sample)
+    props = mfa_build.read_ccn_object_props(sample, expected=len(table.objects))
+    parsed = {}
+    for obj, blob in zip(table.objects, props):
+        if obj.type_id != 7:
+            continue
+        common = mfa_objects.parse_object_common(blob)
+        counter = mfa_objects.parse_counter(blob, common) if common else None
+        if counter:
+            parsed[obj.index] = counter
+    check(len(parsed) == 25, f"{len(parsed)} 个 Counter 外观解出来", str(len(parsed)))
+    one = parsed.get(5)
+    check(one is not None, "5 号 Counter 解出来了")
+    if one:
+        check(one["display"] == 1, "显示类型 = 1（数字）", str(one["display"]))
+        check(one["width"] == 32, "宽 = 32", str(one["width"]))
+        check(len(one["frames"]) == 14, "14 张数字图", str(len(one["frames"])))
+        check(one["frames"][:3] == [245, 246, 247],
+              "图号 245/246/247…", str(one["frames"][:3]))
+    total_frames = sum(len(c["frames"]) for c in parsed.values())
+    check(total_frames == 350, f"数字图合计 {total_frames} 张")
+
+
 def test_errors():
     section("2. 失败路径")
     for kwargs, what in (
@@ -449,6 +480,7 @@ def main() -> int:
     test_object_props()
     test_object_texts()
     test_object_common()
+    test_counters()
     test_errors()
     test_end_to_end()
     test_second_sample()

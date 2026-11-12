@@ -57,6 +57,7 @@ class BuildReport:
     instances_total: int = 0
     layers_written: int = 0
     objects_with_common: int = 0
+    counters_parsed: int = 0
     objects_written: int = 0
     instances_written: int = 0
     instances_skipped: int = 0
@@ -930,6 +931,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
 
     texts = {}
     commons = {}
+    counters = {}
     if objects:
         try:
             objs = read_ccn_objects(ccn_path).objects
@@ -937,10 +939,20 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
             texts = read_ccn_object_texts(ccn_path, objects=objs, props=raw_props)
             if texts:
                 rep.notes.append(f"读到 {len(texts)} 个 String 对象的正文（写进 MFA）")
+            counters = {}
             for obj, blob in zip(objs, raw_props):
                 common = mfa_objects.parse_object_common(blob)
                 if common:
                     commons[obj.index] = common
+                    if obj.type_id == 7:
+                        counter = mfa_objects.parse_counter(blob, common)
+                        if counter:
+                            counters[obj.index] = counter
+            if counters:
+                rep.counters_parsed = len(counters)
+                rep.notes.append(
+                    f"{len(counters)} 个 Counter 的外观读出来了（显示类型 / 宽高 / 数字图），"
+                    "已写进 MFA Counter 加载器")
             rep.objects_with_common = len(commons)
             if commons:
                 rep.notes.append(
@@ -997,7 +1009,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                         events_raw, chunks_raw = mfa_objects.split_rest(f.rest_raw)
                         blobs, handles, inst_blobs, skipped = \
                             mfa_objects.build_frame_objects(
-                                info.instances, texts, commons)
+                                info.instances, texts, commons, counters)
                         if handles:
                             f.rest_raw = mfa_objects.build_frame_rest(
                                 blobs, handles, inst_blobs, events_raw, chunks_raw)
