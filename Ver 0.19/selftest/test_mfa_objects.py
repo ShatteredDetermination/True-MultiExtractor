@@ -78,6 +78,22 @@ def test_object_info():
     check(struct.unpack_from("<I", with_text, len(with_text) - 4)[0] == 0,
           "段落 flags = 0")
 
+    common = {"flags": 0x00040008, "new_flags": 0x0005,
+              "qualifiers": [7, -1, -1, -1, -1, -1, -1, -1],
+              "back_color": b"\x10\x20\x30\x00"}
+    with_flags = mfa_objects.build_loader(2, common=common)
+    expected = mfa_objects.loader_flags(common)
+    check(struct.unpack_from("<I", with_flags, 0)[0] == expected,
+          "加载器用上了成品的对象标志", hex(struct.unpack_from("<I", with_flags, 0)[0]))
+    check(struct.unpack_from("<I", with_flags, 4)[0] == 0x0005,
+          "新对象标志也来自成品")
+    check(with_flags[8:12] == b"\x10\x20\x30\x00", "背景色来自成品",
+          with_flags[8:12].hex(" "))
+    check(struct.unpack_from("<h", with_flags, 12)[0] == 7,
+          "第一个限定符 = 7", str(struct.unpack_from("<h", with_flags, 12)[0]))
+    check(struct.unpack_from("<h", with_flags, 26)[0] == -1,
+          "末位仍是 -1")
+
     for unsupported in (0, 1, 4, 32, 33):
         check(mfa_objects.build_object_info(unsupported, 0, "x") is None,
               f"类型 {unsupported} 不写（返回 None）")
@@ -193,6 +209,8 @@ def test_end_to_end():
         check("GAME CONTROLS".encode("utf-16-le") in out.read_bytes(),
               "String 正文真的写进了 mfa")
         check(any("正文" in n for n in rep.notes), "报告里写了正文条数")
+        check(rep.objects_with_common == 867,
+              f"867 个对象的属性头都解出来了（{rep.objects_with_common}）")
 
 
 def main():

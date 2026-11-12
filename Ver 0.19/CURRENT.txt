@@ -2206,3 +2206,32 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
 
 下一步：Active 动画引用 / Counter 外观 / 扩展对象私有段，然后事件树。
 仍等 Fusion 2.5 两个测试件的结果。
+
+------------------------------------------------------------
+0.19WIP Beta 00129（第 31 轮）：对象属性固定头解开，867 个对象的标志/限定符/背景色进了 mfa
+
+1）0x2256 每段的固定头（跳过 4 B 长度前缀后的前 60 B）布局定下来了：
+   6×u16 段偏移（动画/运动/?/?/扩展/值）、u32 对象标志、8×i16 限定符、
+   3×u16 偏移（数据/可改变量/可改字符串）、u16 新对象标志、u16 偏好标志、
+   4 B 标识、4 B 背景色、i32 ×2 转场偏移、u16 可改变量名偏移。
+   实测 dtlg：867 段全部解出；标识与类型一一对应 —— SPRI 683 / TEXT 96 / CNTR 41，
+   扩展对象各用四字母名（DBTF / DRPC / 0INI …）。
+
+2）代码：
+   - mfa_objects.parse_object_common(blob) → 标志/限定符/背景色/标识/段偏移；
+   - loader_flags(common)：bit17 含义相反要翻转，bit18（CCNCheck）清掉；
+   - _loader_base / build_loader / build_object_info / build_frame_objects 都接受 common；
+   - build_from_ccn 在 objects=True 时读一次属性段，把 common 传给每帧对象写入；
+   - 报告增 objects_with_common，notes 写「867 个对象的属性头解出来了」。
+
+3）实测 dtlg（limit 图像 4，objects=True）：867 个对象的加载器用上了成品的
+   对象标志 / 新对象标志 / 8 个限定符 / 背景色；产物仍 1,512,035 B，validate 零问题。
+
+4）自测（单跑）：
+   test_mfa_build.py  新增 1f 段 7 项（867 段全解、标识对得上、限定符 8 个、
+                      背景色 4 B、标志有多种取值、bit17 翻转、bit18 清掉）
+   test_mfa_objects.py 55 项全过（新增：加载器用上成品标志/新标志/背景色/限定符、
+                      末位 -1、e2e objects_with_common=867）
+
+下一步：拿固定头里的段偏移去读动画表 / 计数器外观 / 扩展私有段，再往 MFA 里填真值。
+仍等 Fusion 2.5 两个测试件的结果。

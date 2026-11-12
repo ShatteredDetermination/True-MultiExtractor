@@ -173,6 +173,35 @@ def test_object_texts():
               for v in texts.values()), "抽出来的都是可打印文本")
 
 
+def test_object_common():
+    section("1f. 对象属性固定头（0x2256 段头）")
+    sample = next((p for p in CCN_SAMPLES if p.is_file()), None)
+    if sample is None:
+        print("  [skip] 成品样本不在本机")
+        return
+    from me.formats.ctf25 import mfa_objects
+
+    table = mfa_build.read_ccn_objects(sample)
+    props = mfa_build.read_ccn_object_props(sample, expected=len(table.objects))
+    commons = [mfa_objects.parse_object_common(b) for b in props]
+    check(all(c for c in commons), "867 段属性头全部解出来",
+          f"{sum(1 for c in commons if c)}/{len(commons)}")
+    want = {0: "DBTF", 2: "DRPC", 3: "TEXT", 4: "SPRI", 5: "CNTR"}
+    got = {i: (commons[i]["identifier"] if commons[i] else None) for i in want}
+    check(got == want, "标识对得上（DBTF / DRPC / TEXT / SPRI / CNTR）", f"{got}")
+    check(all(len(c["qualifiers"]) == 8 for c in commons if c),
+          "限定符都是 8 个")
+    check(all(len(c["back_color"]) == 4 for c in commons if c),
+          "背景色都是 4 字节")
+    flags = [c["flags"] for c in commons if c]
+    check(len(set(flags)) > 3, f"对象标志有 {len(set(flags))} 种取值")
+    c0 = commons[4]
+    flipped = mfa_objects.loader_flags(c0)
+    check(bool(flipped & (1 << 17)) != bool(c0["flags"] & (1 << 17)),
+          "bit17 含义相反，转换时翻过来", f"{c0['flags']:#x} → {flipped:#x}")
+    check(not (flipped & (1 << 18)), "bit18（CCNCheck）被清掉")
+
+
 def test_errors():
     section("2. 失败路径")
     for kwargs, what in (
@@ -419,6 +448,7 @@ def main() -> int:
     test_fonts()
     test_object_props()
     test_object_texts()
+    test_object_common()
     test_errors()
     test_end_to_end()
     test_second_sample()

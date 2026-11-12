@@ -56,6 +56,7 @@ class BuildReport:
     frame_instances: List[List["CcnInstance"]] = field(default_factory=list)
     instances_total: int = 0
     layers_written: int = 0
+    objects_with_common: int = 0
     objects_written: int = 0
     instances_written: int = 0
     instances_skipped: int = 0
@@ -928,13 +929,25 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
         rep.notes.append(f"音频读不出来：{exc}")
 
     texts = {}
+    commons = {}
     if objects:
         try:
-            texts = read_ccn_object_texts(ccn_path)
+            objs = read_ccn_objects(ccn_path).objects
+            raw_props = read_ccn_object_props(ccn_path, expected=len(objs))
+            texts = read_ccn_object_texts(ccn_path, objects=objs, props=raw_props)
             if texts:
                 rep.notes.append(f"读到 {len(texts)} 个 String 对象的正文（写进 MFA）")
+            for obj, blob in zip(objs, raw_props):
+                common = mfa_objects.parse_object_common(blob)
+                if common:
+                    commons[obj.index] = common
+            rep.objects_with_common = len(commons)
+            if commons:
+                rep.notes.append(
+                    f"{len(commons)} 个对象的属性头解出来了（标识 / 标志 / 限定符 / 背景色），"
+                    "已写进 MFA 对象加载器")
         except Exception as exc:
-            rep.notes.append(f"对象正文读不出来：{exc}")
+            rep.notes.append(f"对象属性读不出来：{exc}")
 
     if frame_names:
         try:
@@ -983,7 +996,8 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                     try:
                         events_raw, chunks_raw = mfa_objects.split_rest(f.rest_raw)
                         blobs, handles, inst_blobs, skipped = \
-                            mfa_objects.build_frame_objects(info.instances, texts)
+                            mfa_objects.build_frame_objects(
+                                info.instances, texts, commons)
                         if handles:
                             f.rest_raw = mfa_objects.build_frame_rest(
                                 blobs, handles, inst_blobs, events_raw, chunks_raw)

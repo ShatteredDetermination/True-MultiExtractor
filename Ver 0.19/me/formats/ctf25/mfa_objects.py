@@ -37,15 +37,73 @@ NEW_FLAG_VISIBLE_AT_START = 1 << 3
 
 SUPPORTED_TYPES = (2, 3, 7)
 
+#: CCN 属性段开头的固定头长度（跳过 4 字节长度前缀后）
+COMMON_HEADER = 60
 
-def _loader_base(object_flags):
+
+def parse_object_common(blob):
+    """解 CCN 对象属性段的固定头（`0x2256` 里每段解压后的前 60 B）。
+
+    布局（Fusion 2.5，编译号 ≥ 284）：6 个 u16 段偏移 / u32 对象标志 /
+    8 个 i16 限定符 / u16 数据偏移 / u16 可改变量偏移 / u16 可改字符串偏移 /
+    u16 新对象标志 / u16 偏好标志 / 4 B 标识（`SPRI`/`TEXT`/`CNTR`/`0INI`…）/
+    4 B 背景色 / i32 转入偏移 / i32 转出偏移 / u16 可改变量名偏移。
+    解不出来返回 None（段太短或对不上）。
+    """
+    if not blob or len(blob) < COMMON_HEADER + 4:
+        return None
+    body = blob[4:]           # 段内前 4 B 是它自己的长度
+    try:
+        offsets = list(struct.unpack_from("<6H", body, 0))
+        flags = struct.unpack_from("<I", body, 12)[0]
+        qualifiers = list(struct.unpack_from("<8h", body, 16))
+        data_off, values_off, strings_off = struct.unpack_from("<3H", body, 32)
+        new_flags = struct.unpack_from("<H", body, 38)[0]
+        pref_flags = struct.unpack_from("<H", body, 40)[0]
+        identifier = body[42:46]
+        back_color = body[46:50]
+        trans_in, trans_out = struct.unpack_from("<ii", body, 50)
+        names_off = struct.unpack_from("<H", body, 58)[0]
+    except struct.error:
+        return None
+    if not all(32 <= b < 127 for b in identifier):
+        return None
+    return {
+        "offsets": offsets, "flags": flags, "qualifiers": qualifiers,
+        "data_offset": data_off, "values_offset": values_off,
+        "strings_offset": strings_off, "new_flags": new_flags,
+        "pref_flags": pref_flags, "identifier": identifier.decode("latin-1"),
+        "back_color": back_color, "trans_in": trans_in, "trans_out": trans_out,
+        "names_offset": names_off,
+    }
+
+
+def loader_flags(common):
+    """把 CCN 的对象标志翻成 MFA 加载器的对象标志。
+
+    bit17 含义相反（CCN 是「开始时不要创建」，MFA 是「开始时创建」），
+    bit18（CCNCheck）是 CCN 专用，MFA 里必须清掉。
+    """
+    flags = int(common.get("flags", 0))
+    flags &= ~(1 << 18)
+    if flags & (1 << 17):
+        flags &= ~(1 << 17)
+    else:
+        flags |= (1 << 17)
+    return flags
+
+
+def _loader_base(object_flags, common=None):
     """MFAObjectLoader 的公共段：两套 flags + 背景色 + 9 个限定符 + 4 个空表 + 2 个转场开关。"""
+    common = common or {}
     w = mfa.Writer()
     w.u32(object_flags)
-    w.u32(NEW_FLAG_VISIBLE_AT_START)
-    w.raw(b"\x00\x00\x00\x00")            # 背景色
-    for _ in range(9):
-        w.raw(struct.pack("<h", -1))      # 8 个限定符 + 收尾 -1
+    w.u32(int(common.get("new_flags", 0)) or NEW_FLAG_VISIBLE_AT_START)
+    w.raw(bytes(common.get("back_color", b"\x00\x00\x00\x00")))
+    quals = list(common.get("qualifiers") or [])
+    for i in range(8):
+        w.raw(struct.pack("<h", int(quals[i]) if i < len(quals) else -1))
+    w.raw(struct.pack("<h", -1))          # 收尾 -1
     for _ in range(4):
         w.u32(0)                          # 可改变量 / 可改字符串 / 运动 / 行为
     w.raw(b"\x00")                        # 无转入场
@@ -53,18 +111,20 @@ def _loader_base(object_flags):
     return w.getvalue()
 
 
-def build_loader(type_id, text=None):
+def build_loader(type_id, text=None, common=None):
     """按类型写私有段；不支持的返回 None。
 
     ``text`` 只对 String（类型 3）有意义：写成一段（CString 正文 + u32 flags）。
     其余属性仍是占位默认值。
     """
     if type_id == 2:
-        flags = LOADER_FLAG_DISPLAY_IN_FRONT | LOADER_FLAG_CREATE_AT_START
-        return _loader_base(flags) + b"\x00"          # 0 条动画
+        flags = (loader_flags(common) if common else 0) or \
+            (LOADER_FLAG_DISPLAY_IN_FRONT | LOADER_FLAG_CREATE_AT_START)
+        return _loader_base(flags, common) + b"\x00"    # 0 条动画
     if type_id == 3:
-        flags = LOADER_FLAG_HAS_TEXT | LOADER_FLAG_CREATE_AT_START
-        body = _loader_base(flags)
+        flags = (loader_flags(common) if common else 0) or \
+            (LOADER_FLAG_HAS_TEXT | LOADER_FLAG_CREATE_AT_START)
+        body = _loader_base(flags, common)
         w = mfa.Writer()
         w.i32(0)                          # 宽
         w.i32(0)                          # 高
@@ -80,8 +140,9 @@ def build_loader(type_id, text=None):
             w.u32(0)                      # 0 段
         return body + w.getvalue()
     if type_id == 7:
-        flags = LOADER_FLAG_CREATE_AT_START | LOADER_FLAG_HAS_TEXT
-        body = _loader_base(flags)
+        flags = (loader_flags(common) if common else 0) or \
+            (LOADER_FLAG_CREATE_AT_START | LOADER_FLAG_HAS_TEXT)
+        body = _loader_base(flags, common)
         w = mfa.Writer()
         w.i32(0)                          # 值
         w.i32(0)                          # 最小
@@ -100,9 +161,10 @@ def build_loader(type_id, text=None):
     return None
 
 
-def build_object_info(type_id, handle, name, icon_handle=0, text=None):
+def build_object_info(type_id, handle, name, icon_handle=0, text=None,
+                      common=None):
     """一条 CObjectInfo；类型不支持时返回 None。"""
-    loader = build_loader(type_id, text=text)
+    loader = build_loader(type_id, text=text, common=common)
     if loader is None:
         return None
     w = mfa.Writer()
@@ -162,12 +224,13 @@ def split_rest(rest):
     return rest[8:start], rest[start:]
 
 
-def build_frame_objects(instances, texts=None):
+def build_frame_objects(instances, texts=None, commons=None):
     """按一帧的实例表写对象定义与实例，返回 (对象块, 句柄, 实例块, 跳过的实例数)。
 
     ``texts`` 是 ``{对象下标: 正文}``（String 对象用），没有就写空段落。
     """
     texts = texts or {}
+    commons = commons or {}
     order = []
     seen = set()
     for inst in instances:
@@ -182,7 +245,8 @@ def build_frame_objects(instances, texts=None):
     for inst in order:
         blob = build_object_info(inst.object_type, inst.obj_index,
                                  inst.object_name,
-                                 text=texts.get(inst.obj_index))
+                                 text=texts.get(inst.obj_index),
+                                 common=commons.get(inst.obj_index))
         if blob is None:
             continue
         blobs.append(blob)
