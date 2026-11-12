@@ -1249,6 +1249,11 @@ def validate(buf: bytes) -> List[str]:
             issues.append(f"第 {i + 1} 帧没有名字")
         if not (0 < f.width <= 65535 and 0 < f.height <= 65535):
             issues.append(f"第 {i + 1} 帧尺寸异常 {f.width}x{f.height}")
+        if f.object_count > 0:
+            try:
+                parse_frame_objects(f.rest_raw, f.object_count)
+            except MfaError as exc:
+                issues.append(f"第 {i + 1} 帧的对象列表解析失败：{exc}")
         if len(f.palette) not in (0, 256):
             issues.append(f"第 {i + 1} 帧调色板 {len(f.palette)} 色（应是 256）")
 

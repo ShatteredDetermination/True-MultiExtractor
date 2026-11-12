@@ -161,6 +161,14 @@ def test_inject():
           str(pr2.frames[0].object_count))
     check(mfa.frame_rect(pr2.frames[0].rest_raw) == rect_before,
           "读回来矩形也还在")
+    check(mfa.validate(data) == [], "带对象的产物体检零问题")
+    bad_pr = mfa.read_project(data)
+    frame = bad_pr.frames[0]
+    frame.rest_raw = b"\x63\x00\x00\x00" + frame.rest_raw[4:]
+    bad = mfa.build_project(bad_pr)
+    bad_issues = mfa.validate(bad)
+    check(any("对象列表解析失败" in s for s in bad_issues),
+          "对象列表被改坏时体检要报出来", f"{bad_issues[:2]}")
 
 
 def test_split():

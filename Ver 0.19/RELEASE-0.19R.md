@@ -19,7 +19,7 @@
 | MFA 写入器 | `mfa.py`：容器七段全解，两份参考样本**逐字节重建**；帧尾 chunk 列表与虚拟矩形读写 |
 | flag=3 解密 | `crypto.py`：密钥 = 应用名（0x2224）+ 编辑器工程路径（0x222E），dtlg 逐帧 7 块全解 |
 | 帧信息 | 帧头（宽高 / flags）、虚拟矩形（滚动区）、图层（名字 / 缩放）写进 mfa |
-| 对象 | `--mfa-objects`：占位对象 + 实例位置（1,249 个对象 / 1,249 条实例）；对象属性头（标志 / 限定符 / 背景色 / 四字母标识，867 个全解）；String 正文（96 个里取到 61 段） |
+| 对象 | `--mfa-objects`：对象 + 实例位置（1,249 个对象 / 1,249 条实例，独立解析器可读回）；对象属性头（标志 / 限定符 / 背景色 / 四字母标识，867 个全解）；String 正文（96 个里 61 段）；Counter 外观（41 个里 25 个：显示类型 / 宽高 / 14 张数字图） |
 | 清单 | 产物旁 `<名字>.mfa.json`：帧名 / 尺寸 / 矩形 / 图层 / 实例位置 / 对象表 / 各库条数 / 未重建项 |
 | 第三方兜底 | `--mfa-tool`（env `ME_MFA_TOOL`）：退出码 0 + 产物 `MFU2` 才算成功 |
 
@@ -28,8 +28,8 @@
 | 文件 | 项数 |
 |---|---|
 | `selftest/test_mfa.py` | 216 项 / 13 段 |
-| `selftest/test_mfa_build.py` | 113 项 / 6 段 |
-| `selftest/test_mfa_objects.py` | 55 项 / 5 段 |
+| `selftest/test_mfa_build.py` | 120 项 / 7 段 |
+| `selftest/test_mfa_objects.py` | 61 项 / 6 段 |
 | `selftest/test_crypto.py` | 47 项 / 4 段 |
 | `selftest/test_mfa_tool.py` | 24 项 / 6 段 |
 
