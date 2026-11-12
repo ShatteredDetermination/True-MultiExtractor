@@ -26,6 +26,7 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTal
 | 字体（Fonts） | 17 条（其中 10 条带内嵌 TTF） |
 | 图标（Icons） | 1 张 16×16（来自原游戏） |
 | 帧内内容 | **空**：没有对象、没有实例、没有事件。所以每个帧是空白画面，尺寸 640×480 |
+| 滚动区 | **已按成品写入**（帧尾虚拟矩形）：多数帧就是 640×480，lash warning 是 1280×960、dtlg team presents 是 840×680 |
 
 ## 请回报的三件事
 
