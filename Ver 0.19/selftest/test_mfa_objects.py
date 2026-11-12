@@ -71,6 +71,13 @@ def test_object_info():
           str(len(ct) if ct else None))
     check(struct.unpack_from("<i", ct, 0)[0] == 7, "Counter 类型 7")
 
+    with_text = mfa_objects.build_object_info(3, 0, "text", text="Hello")
+    check(len(with_text) == len(st) + 4 + 2 * len("Hello") + 4,
+          "带正文的 String 段落变长", f"{len(with_text)} vs {len(st)}")
+    check("Hello".encode("utf-16-le") in with_text, "正文按 UTF-16 写进去")
+    check(struct.unpack_from("<I", with_text, len(with_text) - 4)[0] == 0,
+          "段落 flags = 0")
+
     for unsupported in (0, 1, 4, 32, 33):
         check(mfa_objects.build_object_info(unsupported, 0, "x") is None,
               f"类型 {unsupported} 不写（返回 None）")
@@ -183,6 +190,9 @@ def test_end_to_end():
         check(any(f.object_count for f in pr.frames), "至少一帧带对象")
         check(mfa.validate(out.read_bytes()) == [], "产物结构体检零问题")
         check(any("占位" in n for n in rep.notes), "报告里写明是占位对象")
+        check("GAME CONTROLS".encode("utf-16-le") in out.read_bytes(),
+              "String 正文真的写进了 mfa")
+        check(any("正文" in n for n in rep.notes), "报告里写了正文条数")
 
 
 def main():

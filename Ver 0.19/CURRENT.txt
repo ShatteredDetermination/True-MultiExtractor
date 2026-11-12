@@ -2176,3 +2176,33 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
 
 下一步：对象私有段真值（0x2256 里 String 的正文、Active 的动画引用等），然后事件树。
 仍等 Fusion 2.5 的两个测试件结果。
+
+------------------------------------------------------------
+0.19WIP Beta 00127（第 30 轮）：String 正文取出来了，并写进 mfa
+
+1）0x2256 的 String 属性段末尾就是正文：前面紧挨 4 字节颜色（RGB + 00，三色相等），
+   正文 UTF-16、00 00 收尾。取法是「从末尾往前试长度，要求整段可打印且前面 4 字节
+   是合法颜色」—— 这样不会把颜色里的可打印字节（73 73 73 00 里的 s）当成正文。
+   实测 dtlg 96 个 String 取到 **61 段**：Yes / Continue / controls / Select phase /
+   '- GAME CONTROLS -' 多行说明 / 制作名单长文等；剩下 35 个多半本来就是空文本。
+
+2）代码：
+   - mfa_build.extract_object_text(blob) / read_ccn_object_texts(ccn_path)；
+   - mfa_objects.build_loader(type_id, text=...) 把正文写成一段
+     （CString 正文 + u32 段落 flags=0）；
+   - build_from_ccn 在 objects=True 时先读一次正文（只 61 段，很便宜），按帧传给
+     build_frame_objects(instances, texts)；
+   - 报告 notes 里写「读到 61 个 String 对象的正文（写进 MFA）」。
+
+3）实测 dtlg（limit 图像 4，objects=True）：产物 1,512,035 B（比不带正文大 31,456 B），
+   里面能直接搜到 'GAME CONTROLS' 与 'UNDERTALE and DELTARUNE' 的 UTF-16 字节；
+   validate 零问题。
+
+4）自测（单跑）：
+   test_mfa_build.py  新增 1e 段 6 项（≥60 段、Yes、controls 不带颜色字节、
+                      多行说明、换行保住、全是可打印）
+   test_mfa_objects.py 49 项全过（新增：带正文的 String 变长、UTF-16 写入、
+                      段落 flags 0、e2e 产物里能搜到正文、报告写了正文条数）
+
+下一步：Active 动画引用 / Counter 外观 / 扩展对象私有段，然后事件树。
+仍等 Fusion 2.5 两个测试件的结果。

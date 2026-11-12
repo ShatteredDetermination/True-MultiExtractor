@@ -154,6 +154,25 @@ def test_object_props():
         check(False, "条数对不上要报错", "居然没抛")
 
 
+def test_object_texts():
+    section("1e. String 对象正文（0x2256 段尾）")
+    sample = next((p for p in CCN_SAMPLES if p.is_file()), None)
+    if sample is None:
+        print("  [skip] 成品样本不在本机")
+        return
+    texts = mfa_build.read_ccn_object_texts(sample)
+    check(len(texts) >= 60, f"抽到 {len(texts)} 个 String 正文", str(len(texts)))
+    check(texts.get(46) == "Yes", "对象 46 正文 = Yes", repr(texts.get(46)))
+    check(texts.get(120) == "controls", "对象 120 正文 = controls（不带颜色字节）",
+          repr(texts.get(120)))
+    check(str(texts.get(3, "")).startswith("- GAME CONTROLS -"),
+          "对象 3 是多行说明", repr(str(texts.get(3))[:24]))
+    check("\r\n" in str(texts.get(63, "")), "多行正文里的换行保住了",
+          repr(str(texts.get(63))[:24]))
+    check(all(all(32 <= ord(c) < 0x3000 or c in "\r\n\t" for c in v)
+              for v in texts.values()), "抽出来的都是可打印文本")
+
+
 def test_errors():
     section("2. 失败路径")
     for kwargs, what in (
@@ -399,6 +418,7 @@ def main() -> int:
     test_sounds()
     test_fonts()
     test_object_props()
+    test_object_texts()
     test_errors()
     test_end_to_end()
     test_second_sample()

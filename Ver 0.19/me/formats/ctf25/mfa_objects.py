@@ -53,8 +53,12 @@ def _loader_base(object_flags):
     return w.getvalue()
 
 
-def build_loader(type_id):
-    """按类型写私有段；不支持的返回 None。"""
+def build_loader(type_id, text=None):
+    """按类型写私有段；不支持的返回 None。
+
+    ``text`` 只对 String（类型 3）有意义：写成一段（CString 正文 + u32 flags）。
+    其余属性仍是占位默认值。
+    """
     if type_id == 2:
         flags = LOADER_FLAG_DISPLAY_IN_FRONT | LOADER_FLAG_CREATE_AT_START
         return _loader_base(flags) + b"\x00"          # 0 条动画
@@ -68,7 +72,12 @@ def build_loader(type_id):
         w.raw(b"\x00\x00\x00\x00")        # 颜色
         w.u32(0)                          # 对齐等标志
         w.i32(0)                          # 立体
-        w.u32(0)                          # 0 段
+        if text:
+            w.u32(1)                      # 1 段
+            w.cstring(text)
+            w.u32(0)                      # 段落 flags
+        else:
+            w.u32(0)                      # 0 段
         return body + w.getvalue()
     if type_id == 7:
         flags = LOADER_FLAG_CREATE_AT_START | LOADER_FLAG_HAS_TEXT
@@ -91,9 +100,9 @@ def build_loader(type_id):
     return None
 
 
-def build_object_info(type_id, handle, name, icon_handle=0):
+def build_object_info(type_id, handle, name, icon_handle=0, text=None):
     """一条 CObjectInfo；类型不支持时返回 None。"""
-    loader = build_loader(type_id)
+    loader = build_loader(type_id, text=text)
     if loader is None:
         return None
     w = mfa.Writer()
@@ -153,8 +162,12 @@ def split_rest(rest):
     return rest[8:start], rest[start:]
 
 
-def build_frame_objects(instances):
-    """按一帧的实例表写对象定义与实例，返回 (对象块, 句柄, 实例块, 跳过的实例数)。"""
+def build_frame_objects(instances, texts=None):
+    """按一帧的实例表写对象定义与实例，返回 (对象块, 句柄, 实例块, 跳过的实例数)。
+
+    ``texts`` 是 ``{对象下标: 正文}``（String 对象用），没有就写空段落。
+    """
+    texts = texts or {}
     order = []
     seen = set()
     for inst in instances:
@@ -167,7 +180,9 @@ def build_frame_objects(instances):
     handles = []
     mapping = {}
     for inst in order:
-        blob = build_object_info(inst.object_type, inst.obj_index, inst.object_name)
+        blob = build_object_info(inst.object_type, inst.obj_index,
+                                 inst.object_name,
+                                 text=texts.get(inst.obj_index))
         if blob is None:
             continue
         blobs.append(blob)

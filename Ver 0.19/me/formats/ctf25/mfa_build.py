@@ -215,6 +215,63 @@ class CcnFrameInfo:
     decoded: bool = False
 
 
+def _printable(ch: int) -> bool:
+    return (32 <= ch < 0x3000) or ch in (9, 10, 13)
+
+
+def extract_object_text(blob: bytes) -> str:
+    """从 String 对象的属性段里抽正文（末尾的 UTF-16 串）。
+
+    实测布局：正文前面紧挨 4 字节颜色（``RGB + 00``，三色相等），后面是 ``00 00``
+    收尾。所以从末尾往前试长度：取「整段都可打印 + 前面 4 字节是合法颜色」的最长者。
+    这样不会把颜色里的可打印字节（比如 ``73 73 73 00`` 的 ``s``）当成正文。
+    """
+    if len(blob) < 8:
+        return ""
+    end = len(blob)
+    while end >= 2 and blob[end - 2:end] == b"\x00\x00":
+        end -= 2
+        break
+    best = ""
+    for length in range(1, 2000):
+        start = end - length * 2
+        if start < 4:
+            break
+        raw = blob[start:end]
+        try:
+            text = raw.decode("utf-16-le")
+        except UnicodeDecodeError:
+            continue
+        if not text or not all(_printable(ord(c)) for c in text):
+            continue
+        color = blob[start - 4:start]
+        if color[3] != 0 or not (color[0] == color[1] == color[2]):
+            continue
+        if not any(c.isalnum() or c.isalpha() for c in text):
+            continue
+        best = text
+    return best
+
+
+def read_ccn_object_texts(ccn_path, objects=None, props=None):
+    """按对象下标返回「String 对象的正文」：``{下标: 文字}``。"""
+    try:
+        if objects is None:
+            objects = read_ccn_objects(ccn_path).objects
+        if props is None:
+            props = read_ccn_object_props(ccn_path, expected=len(objects))
+    except Exception:
+        return {}
+    texts = {}
+    for obj, blob in zip(objects, props):
+        if obj.type_id != 3:
+            continue
+        text = extract_object_text(blob)
+        if text:
+            texts[obj.index] = text
+    return texts
+
+
 def read_ccn_object_props(ccn_path, expected: Optional[int] = None):
     """读成品里「每个对象一段」的属性块（chunk 0x2256）。
 
@@ -870,6 +927,15 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     except Exception as exc:
         rep.notes.append(f"音频读不出来：{exc}")
 
+    texts = {}
+    if objects:
+        try:
+            texts = read_ccn_object_texts(ccn_path)
+            if texts:
+                rep.notes.append(f"读到 {len(texts)} 个 String 对象的正文（写进 MFA）")
+        except Exception as exc:
+            rep.notes.append(f"对象正文读不出来：{exc}")
+
     if frame_names:
         try:
             infos = read_ccn_frames_info(ccn_path)
@@ -917,7 +983,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                     try:
                         events_raw, chunks_raw = mfa_objects.split_rest(f.rest_raw)
                         blobs, handles, inst_blobs, skipped = \
-                            mfa_objects.build_frame_objects(info.instances)
+                            mfa_objects.build_frame_objects(info.instances, texts)
                         if handles:
                             f.rest_raw = mfa_objects.build_frame_rest(
                                 blobs, handles, inst_blobs, events_raw, chunks_raw)
