@@ -593,6 +593,42 @@ def test_frame_chunks():
         check(mfa.set_frame_rect(patched, rect) == rest, "改回原值逐字节一致")
 
 
+def test_frame_objects():
+    section("14. 帧内对象列表解析")
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    want = {
+        "Template.mfa": ([], 0, 0),
+        "Platformer Engine.mfa": (
+            ["Enemy", "Actor", "~ Ground Block", "Obstacle", "Platformer Engine",
+             "_ Debug Text", "~ Ground Slope Left", "~ Ground Slope Right",
+             "~ Corridor", "~ Room", "Actor Sprite", "Fan"], 8, 82),
+    }
+    for p in present:
+        raw = p.read_bytes()
+        pr = mfa.read_project(raw)
+        f = pr.frames[0]
+        names, folders_want, instances_want = want.get(p.name, ([], 0, 0))
+        got = mfa.parse_frame_objects(f.rest_raw, f.object_count)
+        check([o["name"] for o in got["objects"]] == names,
+              f"{p.name} 对象名逐个对上（{len(names)} 个）",
+              f"{[o['name'] for o in got['objects']][:3]}")
+        check(len(got["folders"]) == folders_want,
+              f"{p.name} 文件夹 {folders_want} 个", str(len(got["folders"])))
+        check(len(got["instances"]) == instances_want,
+              f"{p.name} 实例 {instances_want} 条", str(len(got["instances"])))
+        chunks = mfa.frame_chunks(f.rest_raw)
+        check(got["end"] <= chunks[0][1],
+              f"{p.name} 解析终点在帧尾 chunk 列表之前",
+              f"0x{got['end']:X} vs 0x{chunks[0][1]:X}")
+        if p.name == "Platformer Engine.mfa":
+            tail = f.rest_raw[got["end"]:got["end"] + 4]
+            check(tail == b"\x06\x04\x00\x00",
+                  "对象/文件夹/实例之后紧接着是事件段头", tail.hex(" "))
+
+
 def test_validate():
     section("13. 结构体检")
     present = [p for p in SAMPLES if p.is_file()]
@@ -640,6 +676,7 @@ def main() -> int:
     test_project()
     test_frames()
     test_frame_chunks()
+    test_frame_objects()
     test_validate()
 
     print("\n" + "=" * 66)

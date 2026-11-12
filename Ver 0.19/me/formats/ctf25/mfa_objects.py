@@ -265,9 +265,13 @@ def build_frame_objects(instances, texts=None, commons=None):
 
 
 def build_frame_rest(blobs, handles, inst_blobs, events_raw, chunks_raw):
-    """拼帧体：对象列表 + 文件夹 + 实例列表 + 事件段 + 帧尾 chunk 列表。"""
+    """拼帧体：对象列表 + 文件夹 + 实例列表 + 事件段 + 帧尾 chunk 列表。
+
+    对象数不写在这里 —— 它在帧头（`build_frame` 写 `f.object_count`），
+    帧体直接从第一个 CObjectInfo 开始。
+    """
     w = mfa.Writer()
-    w.u32(len(blobs))
+    # 对象数在帧头里（build_frame 会写），帧体本身从第一个对象开始，别再写一遍
     for blob in blobs:
         w.raw(blob)
     w.raw(build_folders(handles))

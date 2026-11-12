@@ -128,7 +128,9 @@ def test_instances():
 
     rest = mfa_objects.build_frame_rest(blobs, handles, insts,
                                         events_raw=b"EV", chunks_raw=b"\x21")
-    check(struct.unpack_from("<I", rest, 0)[0] == 1, "帧体首 u32 = 对象数")
+    check(struct.unpack_from("<i", rest, 0)[0] == 3,
+          "帧体直接从第一个对象开始（类型 3），不再重复写对象数",
+          str(struct.unpack_from("<i", rest, 0)[0]))
     check(rest.endswith(b"EV\x21"), "事件段与帧尾 chunk 原样接在后面")
 
 
@@ -211,6 +213,17 @@ def test_end_to_end():
         check(any("正文" in n for n in rep.notes), "报告里写了正文条数")
         check(rep.objects_with_common == 867,
               f"867 个对象的属性头都解出来了（{rep.objects_with_common}）")
+        parsed_instances = 0
+        parsed_objects = 0
+        for fr in pr.frames:
+            got = mfa.parse_frame_objects(fr.rest_raw, fr.object_count)
+            parsed_objects += len(got["objects"])
+            parsed_instances += len(got["instances"])
+        check(parsed_objects == rep.objects_written,
+              f"独立解析器读回 {parsed_objects} 个对象", str(rep.objects_written))
+        check(parsed_instances == rep.instances_written,
+              f"独立解析器读回 {parsed_instances} 条实例",
+              str(rep.instances_written))
 
 
 def main():

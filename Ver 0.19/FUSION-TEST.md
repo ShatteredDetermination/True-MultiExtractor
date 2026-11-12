@@ -33,7 +33,7 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTal
 
 ```
 C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\min-object.mfa
-（194,491 B；模板 + 3 个占位对象 + 3 条实例，帧名 Object Test）
+（194,487 B；模板 + 3 个占位对象 + 3 条实例，帧名 Object Test）
 ```
 
 如果一号件能打开、二号件打不开，问题就在「对象 / 实例」这层（占位对象只有类型 / 名字 /

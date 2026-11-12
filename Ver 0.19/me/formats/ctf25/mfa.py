@@ -1403,6 +1403,192 @@ def describe_frame(f: MfaFrame) -> str:
             f"其余 {len(f.rest_raw)} B 原样")
 
 
+# ------------------------------------------------------------------ 帧内对象列表
+# 每帧在「转场开关 ×2」之后是 `u32 对象数`，随后逐个 CObjectInfo：
+# 类型 / 句柄 / CString 名字 / 透明 / 墨迹 / 墨迹参数 / 抗锯齿 / 对象标志 /
+# 图标类型 / 图标句柄 / 可选块（u8 id + i32 size）/ u8 0 收尾 / 加载器。
+# 加载器公共段 48 B + 按类型私有段（Active 动画表 / String 段落 / Counter 字段）。
+# 参考样本 Platformer Engine.mfa 的 Level 帧里 12 个对象就是按这个布局排的。
+
+def _mfa_remove_chunks(r: "Reader") -> List[Tuple[int, bytes]]:
+    """读对象内部的可选块列表（u8 id + i32 size），返回 [(id, data)]。"""
+    out = []
+    while r.pos < len(r.buf):
+        cid = r.take(1)[0]
+        if cid == 0:
+            break
+        size = r.u32()
+        out.append((cid, r.take(size)))
+        if len(out) > 16:
+            break
+    return out
+
+
+def _mfa_read_directions(r: "Reader") -> List[dict]:
+    count = r.u32()
+    dirs = []
+    for _ in range(count):
+        index = r.i32()
+        min_speed = r.i32()
+        max_speed = r.i32()
+        repeat = r.i32()
+        repeat_frame = r.i32()
+        frames = [r.u32() for _ in range(r.u32())]
+        dirs.append(dict(index=index, min_speed=min_speed,
+                         max_speed=max_speed, repeat=repeat,
+                         repeat_frame=repeat_frame, frames=frames))
+    return dirs
+
+
+def _mfa_read_animations(r: "Reader") -> List[dict]:
+    if r.take(1)[0] == 0:
+        return []
+    anims = []
+    for _ in range(r.u32()):
+        name = r.cstring()
+        anims.append(dict(name=name, directions=_mfa_read_directions(r)))
+    return anims
+
+
+def _mfa_read_loader(r: "Reader", type_id: int) -> dict:
+    """加载器：背景类（0/1）只有自己的固定字段，其余类型先读 48 B 公共段。"""
+    loader = {}
+    if type_id == 0:                      # 快照背景：48 B 固定字段
+        loader["obstacle_type"] = r.u32()
+        loader["collision_type"] = r.u32()
+        loader["width"] = r.i32()
+        loader["height"] = r.i32()
+        loader["shape"] = r.i32()
+        loader["border_size"] = r.i32()
+        loader["border_color"] = r.take(4)
+        loader["fill_type"] = r.i32()
+        loader["color1"] = r.take(4)
+        loader["color2"] = r.take(4)
+        loader["quick_flags"] = r.u32()
+        loader["image"] = r.u32()
+        return loader
+    if type_id == 1:                      # 背景：12 B
+        loader["obstacle_type"] = r.u32()
+        loader["collision_type"] = r.u32()
+        loader["image"] = r.u32()
+        return loader
+
+    loader["flags"] = r.u32()
+    loader["new_flags"] = r.u32()
+    loader["background"] = r.take(4)
+    loader["qualifiers"] = [r.u16() for _ in range(8)]
+    r.take(2)                                    # 收尾 -1
+    values = []
+    for _ in range(r.u32()):
+        values.append((r.cstring(), r.u32(), r.i32()))
+    loader["alterable_values"] = values
+    strings = []
+    for _ in range(r.u32()):
+        strings.append((r.cstring(), r.u32(), r.cstring()))
+    loader["alterable_strings"] = strings
+    movements = []
+    for _ in range(r.u32()):
+        name = r.cstring()
+        extension = r.cstring()
+        movement_id = r.i32()
+        size = r.i32()
+        data_start = r.pos
+        movements.append(dict(name=name, extension=extension, id=movement_id,
+                              size=size))
+        # DataSize 从「运动数据起点」算起（12 B 核心 + 定义），不是从名字算起
+        r.pos = data_start + size
+    loader["movements"] = movements
+    behaviours = []
+    for _ in range(r.u32()):
+        name = r.cstring()
+        behaviours.append(dict(name=name, data=r.take(r.i32())))
+    loader["behaviours"] = behaviours
+    r.take(1)                                    # 无转入场
+    r.take(1)                                    # 无转出场
+    if type_id == 2:
+        loader["animations"] = _mfa_read_animations(r)
+    elif type_id == 3:
+        loader["width"] = r.i32()
+        loader["height"] = r.i32()
+        loader["font"] = r.i32()
+        loader["color"] = r.take(4)
+        loader["string_flags"] = r.u32()
+        r.i32()                                  # 立体
+        paragraphs = []
+        for _ in range(r.u32()):
+            paragraphs.append(dict(text=r.cstring(), flags=r.u32()))
+        loader["paragraphs"] = paragraphs
+    elif type_id == 7:
+        loader["value"] = r.i32()
+        loader["minimum"] = r.i32()
+        loader["maximum"] = r.i32()
+        loader["display_type"] = r.u32()
+        loader["fill_type"] = r.i32()
+        loader["color1"] = r.take(4)
+        loader["color2"] = r.take(4)
+        loader["vertical_gradient"] = r.i32()
+        loader["bar_direction"] = r.i32()
+        loader["width"] = r.i32()
+        loader["height"] = r.i32()
+        loader["images"] = [r.u32() for _ in range(r.u32())]
+        loader["font"] = r.u32()
+    else:
+        raise MfaError(f"对象加载器类型 {type_id} 还没实现解析")
+    return loader
+
+
+def parse_frame_objects(rest: bytes, count: int, start: int = 0):
+    """从帧体的 ``start`` 处读对象列表、文件夹与实例，返回 dict。
+
+    ``{"objects": [...], "folders": [...], "instances": [...], "end": 偏移}``；
+    对象只解析 2 / 3 / 7 三种加载器，其余抛 ``MfaError``（不硬猜长度）。
+    """
+    r = Reader(rest, start)
+    if count > 65535:
+        raise MfaError(f"对象数 {count} 异常")
+    objects = []
+    for _ in range(count):
+        obj = {}
+        obj["type"] = r.i32()
+        obj["handle"] = r.i32()
+        obj["name"] = r.cstring()
+        obj["transparent"] = r.i32()
+        obj["ink_effect"] = r.i32()
+        obj["ink_parameter"] = r.u32()
+        obj["antialias"] = r.i32()
+        obj["flags"] = r.u32()
+        obj["icon_type"] = r.i32()
+        obj["icon_handle"] = r.u32()
+        obj["chunks"] = _mfa_remove_chunks(r)
+        obj["loader"] = _mfa_read_loader(r, obj["type"])
+        objects.append(obj)
+    folder_count = r.u32()
+    folders = []
+    for _ in range(folder_count):
+        head = r.take(1)[0]
+        r.take(1)
+        if head == 112:
+            r.take(1)
+            head = r.take(1)[0]
+        else:
+            r.take(2)
+        if head == 4:
+            name = r.cstring()
+            children = [r.i32() for _ in range(r.u32())]
+        else:
+            name = ""
+            children = [r.i32()]
+        folders.append(dict(name=name, hidden=head != 4, children=children))
+    inst_count = r.u32()
+    instances = []
+    for _ in range(inst_count):
+        instances.append(dict(
+            x=r.i32(), y=r.i32(), layer=r.u32(), handle=r.u32(),
+            flags=r.u16(), instance_value=struct.unpack("<h", r.take(2))[0],
+            parent_type=r.u32(), object_info=r.u32(), parent_handle=r.u32()))
+    return dict(objects=objects, folders=folders, instances=instances, end=r.pos)
+
+
 # ------------------------------------------------------------------ 帧尾 chunk 列表
 # 帧体的最后是一段 `u8 id + i32 size + 数据` 的 chunk 列表，收尾是**一个字节 0**。
 # 列表前面是对象 / 文件夹 / 实例 / 事件，长度随工程变，所以不能从固定偏移开始读，

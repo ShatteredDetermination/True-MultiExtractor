@@ -2256,3 +2256,26 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
 3）文档：FORMATS.md 记下动画表这次尝试与实际读数（并写明已回滚）；ROADMAP 增「发版清单（草稿）」。
 
 本轮没动 mfa.py / mfa_build.py，只加文档；test_mfa_objects 55 项复跑仍全过。
+
+------------------------------------------------------------
+0.19WIP Beta 00131（第 33 轮）：帧内对象列表能读了；抓出并修掉「帧体重复写对象数」
+
+1）新增 mfa.parse_frame_objects(rest, count) + _mfa_read_loader：按文档布局读对象
+   （类型/句柄/名字/图标/可选块/加载器）、文件夹、实例。加载器覆盖：
+   0 快照背景 48 B；1 背景 12 B；2 Active（动画表：名字 + 方向，每方向 5 个 i32 + 帧列表）；
+   3 String（宽高字体颜色标志 + 段落）；7 Counter（值/上下限/显示/颜色/宽高/图/字体）。
+   四个表（可改变量/可改字符串/运动/行为）按条目跳过，运动段按 DataSize 跳过。
+   验证：Platformer 的 Level 帧读出 12 个对象，名字 Enemy / Actor / ~ Ground Block /
+   Obstacle / Platformer Engine / _ Debug Text / ~ Ground Slope Left / ~ Ground Slope Right /
+   ~ Corridor / ~ Room / Actor Sprite / Fan 逐个对上；8 个文件夹、82 条实例；
+   解析终点正好在事件段（06 04 00 00 + Evts）之前。
+
+2）这个解析器立刻抓出一个真 bug：--mfa-objects 的帧体在对象列表前面重复写了一遍
+   「对象数」（帧头里已有），拿参考样本的布局一对就露馅。已修（build_frame_rest 不再写），
+   并加自测：独立解析器读回 1,249 个对象 / 1,249 条实例，与写入数一致。
+
+3）自测（单跑）：test_mfa.py 225 项 / 14 段（新增第 14 段）；test_mfa_objects.py 57 项；
+   test_mfa_build.py 113 项 —— 全过。min-object.mfa 重建为 194,487 B。
+
+下一步：Counter 外观字段、扩展对象私有段、事件段；然后再谈发版。
+仍等 Fusion 2.5 两个测试件的结果。
