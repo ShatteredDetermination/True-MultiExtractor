@@ -33,13 +33,13 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTal
 
 ```
 C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\min-object.mfa
-（194,433 B；模板 + 3 个占位对象 + 3 条实例，帧名 Object Test）
+（194,491 B；模板 + 3 个占位对象 + 3 条实例，帧名 Object Test）
 ```
 
 如果一号件能打开、二号件打不开，问题就在「对象 / 实例」这层（占位对象只有类型 / 名字 /
 图标，加载器是空壳）；反过来都打不开，问题在更外层的容器或资源库。
 这个文件就是 `mfa_objects.add_objects_to_frame()` 把 3 个对象塞进 `Template.mfa` 的产物
-（Active / String / Counter 各一个，实例分别摆在 100,120 / 320,240 / 500,300）。
+（Active / String / Counter 各一个，实例分别摆在 100,120 / 320,240 / 500,300；String 那个带正文 `Hello from MultiExtractor`）。
 
 ## 请回报的三件事
 
