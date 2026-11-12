@@ -127,6 +127,33 @@ def test_fonts():
     check(f.weight == 400, "weight 缺省补 400", f"{f.weight}")
 
 
+def test_object_props():
+    section("1d. 对象属性块（0x2256）")
+    sample = next((p for p in CCN_SAMPLES if p.is_file()), None)
+    if sample is None:
+        print("  [skip] 成品样本不在本机")
+        return
+    import struct
+
+    table = mfa_build.read_ccn_objects(sample)
+    props = mfa_build.read_ccn_object_props(sample, expected=len(table.objects))
+    check(len(props) == len(table.objects) == 867,
+          f"属性块 {len(props)} 段 = 对象表 {len(table.objects)} 条",
+          f"{len(props)} / {len(table.objects)}")
+    check(all(p for p in props), "没有空段")
+    ok = all(struct.unpack_from("<I", p, 0)[0] == len(p)
+             for p in props if len(p) >= 4)
+    check(ok, "每段头 4 字节 = 它自己的长度")
+    check(len(props[0]) == 136 and len(props[-1]) > 0,
+          f"首段 {len(props[0])} B，末段 {len(props[-1])} B")
+    try:
+        mfa_build.read_ccn_object_props(sample, expected=1)
+    except mfa_build.MfaBuildError:
+        check(True, "条数对不上要报错")
+    else:
+        check(False, "条数对不上要报错", "居然没抛")
+
+
 def test_errors():
     section("2. 失败路径")
     for kwargs, what in (
@@ -371,6 +398,7 @@ def main() -> int:
     test_convert_image()
     test_sounds()
     test_fonts()
+    test_object_props()
     test_errors()
     test_end_to_end()
     test_second_sample()

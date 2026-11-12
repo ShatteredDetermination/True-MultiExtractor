@@ -215,6 +215,49 @@ class CcnFrameInfo:
     decoded: bool = False
 
 
+def read_ccn_object_props(ccn_path, expected: Optional[int] = None):
+    """读成品里「每个对象一段」的属性块（chunk 0x2256）。
+
+    布局是连续记录：``u32 解压后长度 + u32 压缩长度 + zlib 数据``，一直排到块尾。
+    实测 dtlg-v1.1.0.exe：**867 条**，8 + Σ压缩长度 正好用光 79,088 B，
+    条数与 0x2253 的对象表（867 条）相等 —— 两边互相对得上。
+    解出来的每段头 4 字节就是它自己的长度，后面是对象属性（含扩展对象的私有数据，
+    例如字符串对象的 ``TEXT``、Discord 的 ``DRPC``），字段还没拆。
+    """
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        chunk = None
+        for ch in chunk_mod.scan(buf, loc.chunk_start, len(buf)):
+            if ch.id == 0x2256:
+                chunk = ch
+                break
+        if chunk is None:
+            return []
+        data = buf[chunk.data_offset:chunk.data_offset + chunk.size]
+        props = []
+        pos = 0
+        while pos + 8 <= len(data):
+            declared, compressed = struct.unpack_from("<II", data, pos)
+            if compressed == 0 or pos + 8 + compressed > len(data):
+                break
+            body = data[pos + 8:pos + 8 + compressed]
+            pos += 8 + compressed
+            try:
+                out = zlib.decompress(body)
+            except zlib.error:
+                break
+            props.append(out)
+        if expected is not None and len(props) != expected:
+            raise MfaBuildError(
+                f"0x2256 读出 {len(props)} 段，对象表说 {expected} 条")
+        return props
+    finally:
+        mm.close()
+
+
 @dataclass
 class CcnInstance:
     """成品里的一条实例（帧内 0x3338 块）。
