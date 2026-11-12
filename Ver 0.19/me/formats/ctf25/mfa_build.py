@@ -55,6 +55,7 @@ class BuildReport:
     instances_by_frame: List[int] = field(default_factory=list)
     frame_instances: List[List["CcnInstance"]] = field(default_factory=list)
     instances_total: int = 0
+    frame_rects_written: int = 0
     frames_decoded: int = 0
     objects: int = 0
     object_names: List[str] = field(default_factory=list)
@@ -848,6 +849,12 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 elif rep.width and rep.height:
                     f.width, f.height = rep.width, rep.height
                 f.last_x, f.last_y = f.width // 2, f.height // 2
+                if info.decoded and info.rect and info.rect != (0, 0, 0, 0):
+                    try:
+                        f.rest_raw = mfa.set_frame_rect(f.rest_raw, info.rect)
+                        rep.frame_rects_written += 1
+                    except mfa.MfaError as exc:
+                        rep.notes.append(f"帧 {f.name!r} 的虚拟矩形没写进去：{exc}")
                 pr.frames.append(f)
                 rep.frame_sizes.append((f.width, f.height))
                 rep.frame_layers.append(list(info.layers))
@@ -860,6 +867,10 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 rep.notes.append(
                     f"帧头解密成功 {rep.frames_decoded}/{len(pr.frames)} 帧，"
                     "尺寸与图层按帧头（密钥 = 应用名 + 编辑器工程路径）")
+            if rep.frame_rects_written:
+                rep.notes.append(
+                    f"虚拟矩形写进 MFA {rep.frame_rects_written} 帧"
+                    "（帧尾 chunk 0x21，滚动区跟成品一致）")
             if rep.instances_total:
                 rep.notes.append(
                     f"实例读到 {rep.instances_total} 条（对象下标 + x/y + 图层），"

@@ -1403,6 +1403,69 @@ def describe_frame(f: MfaFrame) -> str:
             f"其余 {len(f.rest_raw)} B 原样")
 
 
+# ------------------------------------------------------------------ 帧尾 chunk 列表
+# 帧体的最后是一段 `u8 id + i32 size + 数据` 的 chunk 列表，收尾是**一个字节 0**。
+# 列表前面是对象 / 文件夹 / 实例 / 事件，长度随工程变，所以不能从固定偏移开始读，
+# 只能找「从某处起能一路解析到帧尾、且第一条是 0x21（虚拟矩形）」的起点。
+# 两份参考样本都是 12 条：0x21 虚拟矩形 / 0x23 / 0x25 图层效果 / 0x26 / 0x27 /
+# 0x28 / 0x2A / 0x2B / 0x2C / 0x2E / 0x2F / 0x30。
+
+FRAME_CHUNK_RECT = 0x21
+
+
+def frame_chunks(rest: bytes):
+    """把帧尾的 chunk 列表拆出来：``[(id, offset, size, data)]``；拆不出返回 None。"""
+    n = len(rest)
+    for start in range(n):
+        if rest[start] != FRAME_CHUNK_RECT:
+            continue
+        pos = start
+        items = []
+        while pos < n:
+            cid = rest[pos]
+            if cid == 0:
+                break
+            if pos + 5 > n:
+                items = None
+                break
+            size = struct.unpack_from("<i", rest, pos + 1)[0]
+            if size < 0 or pos + 5 + size > n:
+                items = None
+                break
+            items.append((cid, pos, size, rest[pos + 5:pos + 5 + size]))
+            pos += 5 + size
+            if len(items) > 256:
+                items = None
+                break
+        if items and items[0][0] == FRAME_CHUNK_RECT and pos + 1 == n \
+                and rest[pos] == 0:
+            return items
+    return None
+
+
+def frame_rect(rest: bytes):
+    """帧的虚拟矩形（滚动区）：``(左, 上, 右, 下)``；没有这块返回 None。"""
+    chunks = frame_chunks(rest)
+    if not chunks:
+        return None
+    cid, _off, size, data = chunks[0]
+    if cid != FRAME_CHUNK_RECT or size != 16:
+        return None
+    return struct.unpack("<iiii", data)
+
+
+def set_frame_rect(rest: bytes, rect) -> bytes:
+    """把帧的虚拟矩形改成 ``rect``（长度不变，只改 16 B 载荷）。"""
+    chunks = frame_chunks(rest)
+    if not chunks:
+        raise MfaError("帧尾找不到 chunk 列表，写不了虚拟矩形")
+    cid, off, size, data = chunks[0]
+    if cid != FRAME_CHUNK_RECT or size != 16:
+        raise MfaError("帧尾第一条 chunk 不是 16 B 的虚拟矩形")
+    payload = struct.pack("<iiii", *rect)
+    return rest[:off + 5] + payload + rest[off + 5 + 16:]
+
+
 def extract_strings(body: bytes, min_chars: int = 3, limit: int = 200) -> List[str]:
     """把一段字节里「看起来是 CString 的 UTF-16 文本」都捞出来。
 

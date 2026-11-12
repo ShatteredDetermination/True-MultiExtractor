@@ -554,6 +554,45 @@ def test_frames():
             check(len(names) >= 8, f"帧体里一共捞到 {len(names)} 个名字")
 
 
+def test_frame_chunks():
+    section("13. 帧尾 chunk 列表与虚拟矩形")
+    check(mfa.frame_chunks(b"") is None, "空帧体没有 chunk 列表")
+    check(mfa.frame_rect(b"") is None, "空帧体没有虚拟矩形")
+    try:
+        mfa.set_frame_rect(b"", (0, 0, 1, 1))
+        check(False, "没有 chunk 列表时写矩形要报错")
+    except mfa.MfaError:
+        check(True, "没有 chunk 列表时写矩形要报错")
+
+    want = {
+        "Template.mfa": ((0, 0, 640, 360), 12),
+        "Platformer Engine.mfa": ((0, 0, 1280, 360), 12),
+    }
+    present = [p for p in SAMPLES if p.is_file()]
+    if not present:
+        print("  [skip] 参考 MFA 不在本机")
+        return
+    for p in present:
+        pr = mfa.read_project(p.read_bytes())
+        rest = pr.frames[0].rest_raw
+        chunks = mfa.frame_chunks(rest)
+        rect, count = want.get(p.name, (None, 0))
+        check(chunks is not None and len(chunks) == count,
+              f"{p.name} 帧尾 {count} 个 chunk",
+              f"{len(chunks) if chunks else None}")
+        if not chunks:
+            continue
+        check(chunks[0][0] == 0x21 and chunks[0][2] == 16,
+              f"{p.name} 第一条是 16 B 的虚拟矩形", hex(chunks[0][0]))
+        check(mfa.frame_rect(rest) == rect, f"{p.name} 虚拟矩形 {rect}",
+              str(mfa.frame_rect(rest)))
+        patched = mfa.set_frame_rect(rest, (1, 2, 640, 480))
+        check(len(patched) == len(rest), "改矩形不改长度")
+        check(mfa.frame_rect(patched) == (1, 2, 640, 480), "改完读回来是新值",
+              str(mfa.frame_rect(patched)))
+        check(mfa.set_frame_rect(patched, rect) == rest, "改回原值逐字节一致")
+
+
 def test_validate():
     section("13. 结构体检")
     present = [p for p in SAMPLES if p.is_file()]
@@ -600,6 +639,7 @@ def main() -> int:
     test_chunks()
     test_project()
     test_frames()
+    test_frame_chunks()
     test_validate()
 
     print("\n" + "=" * 66)

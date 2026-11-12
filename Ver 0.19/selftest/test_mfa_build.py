@@ -196,6 +196,16 @@ def test_end_to_end():
         check(rep.frames_decoded == rep.frames,
               f"逐帧帧头都解开了（{rep.frames_decoded}/{rep.frames}）",
               f"{rep.frames_decoded}/{rep.frames}")
+        check(rep.frame_rects_written == rep.frames_decoded,
+              f"虚拟矩形写进 {rep.frame_rects_written} 帧",
+              f"{rep.frame_rects_written}/{rep.frames_decoded}")
+        got_rects = [mfa.frame_rect(fr.rest_raw) for fr in pr.frames]
+        check(got_rects == [tuple(r) for r in rep.frame_rects],
+              "写进去的矩形与成品逐帧一致",
+              f"{got_rects[:2]} vs {rep.frame_rects[:2]}")
+        check(any(r[2] > rep.width for r in got_rects),
+              "滚动区比窗口大的帧也写对了",
+              f"{[r for r in got_rects if r and r[2] > rep.width][:2]}")
         check(all(sz == (w, h) for sz in rep.frame_sizes),
               "每帧尺寸与帧头一致", f"{rep.frame_sizes[:3]}")
         check(rep.frame_rects and rep.frame_rects[0] == (0, 0, w, h),
