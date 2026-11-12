@@ -153,6 +153,26 @@ def read_flag3_chunks(path):
         mm.close()
 
 
+def read_app_texts(path):
+    """密钥要用的两串：0x2224 应用名、0x222E 编辑器工程路径。"""
+    texts = {}
+    mm, loc = container.open_file(str(path))
+    try:
+        buf = mm.mm
+        for ch in chunk_mod.scan(buf, loc.chunk_start, len(buf)):
+            if ch.id not in (0x2224, 0x222E):
+                continue
+            try:
+                data = chunk_mod.load(buf, ch)
+            except Exception:
+                continue
+            texts[ch.id] = data.decode(
+                "utf-16-le" if loc.unicode else "latin-1", "ignore").rstrip("\x00")
+        return texts
+    finally:
+        mm.close()
+
+
 def test_samples():
     section("4. 真样本取证（块体布局）")
     import struct
@@ -178,12 +198,39 @@ def test_samples():
               f"{path.name} 声明长度都在合理范围", str(decls))
         check(0x3334 in decls and decls[0x3334] > 0,
               f"{path.name} 帧头块有声明长度", str(decls.get(0x3334)))
-        try:
-            crypto.decrypt_chunk_body(dict(pieces)[0x3337], 0x3337)
-        except crypto.CryptoError:
-            print("  [info] 密钥还没定，flag=3 块仍解不开（布局已确认）")
+
+        texts = read_app_texts(path)
+        check(0x2224 in texts and bool(texts[0x2224]),
+              f"{path.name} 读到应用名", repr(texts.get(0x2224)))
+        key = crypto.app_key(texts.get(0x2224, ""), texts.get(0x222E, ""))
+        ok = 0
+        payloads = {}
+        for cid, body in pieces:
+            try:
+                decl, data = crypto.decrypt_chunk_body(body, cid, key=key)
+            except crypto.CryptoError:
+                continue
+            if len(data) == decl:
+                ok += 1
+                payloads[cid] = data
+        if path.name.startswith("dtlg"):
+            check(ok == len(pieces), f"{path.name} 全部 flag=3 块解开",
+                  f"{ok}/{len(pieces)}")
+            header = payloads.get(0x3334, b"")
+            check(len(header) >= 8, "帧头解出足够字节", f"{len(header)} B")
+            if len(header) >= 8:
+                w, h = struct.unpack_from("<II", header, 0)
+                check((w, h) == (640, 480), "帧头宽高 = 640x480", f"{w}x{h}")
+            layers = payloads.get(0x3341, b"")
+            check(b"L\x00a\x00y\x00e\x00r\x00 \x001\x00" in layers,
+                  "图层块里有 'Layer 1'", f"{len(layers)} B")
+            rect = payloads.get(0x3342, b"")
+            if len(rect) >= 16:
+                box = struct.unpack_from("<iiii", rect, 0)
+                check(box == (0, 0, 640, 480), "虚拟矩形 = 0,0,640,480", str(box))
         else:
-            print("  [info] 咦？没定密钥居然解开了，去更新 crypto.KEY_STATUS")
+            print(f"  [info] {path.name} 这把密钥对不上：{ok}/{len(pieces)}"
+                  "（转换器会按应用窗口兜底）")
 
     if not found:
         global SKIPPED

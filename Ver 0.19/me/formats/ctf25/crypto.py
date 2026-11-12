@@ -16,10 +16,12 @@ CTFAK 同源），Python 侧为独立重写：只用了标准库，没有复制�
   还要把加密数据的第 0 字节异或 ``(id & 0xFF) ^ (id >> 8)``，
   这个「补丁」只在编译号 > 285 的成品里出现。
 
-**还差的一步**：密钥到底由哪些字符串拼出来，样本上还没对上
-（候选试过「应用名」「应用名 + Fusion」「Fusion + 应用名」以及带版本号的一批，
-全部解不出）。所以本模块目前对真样本会抛 ``CryptoError``，等密钥定下来，
-帧头 / 图层 / 实例 / 事件 / 对象属性就能全部读出来了。
+**密钥（已定）**：``app_key(应用名, 编辑器工程路径)``，也就是 0x2224 与 0x222E
+两串拼起来。实测 ``dtlg-v1.1.0.exe``：7 个 flag=3 块全部解开 —— 帧头 640×480、
+图层 ``Layer 1``、虚拟矩形 ``0,0,640,480``、调色板 256 色、实例 4 条、事件 9,548 B。
+第二份样本（``Undertale Last Breath Scrapped.dat``）这把密钥对不上：交换两串顺序、
+改用目标路径、加 ``Fusion`` / 版本号都试过，仍然解不开。遇到这种情况调用方必须
+退回「应用窗口尺寸兜底」，不许硬猜。
 
 块体布局本身已经确认：两支样本的 0x3337 调色板块声明长度恒为
 ``1028 = 256 × 4 + 4``（调色板 256 色 + 一个 u32 计数），0x3341 图层块恒为 40、
@@ -39,11 +41,11 @@ __all__ = [
 #: 编译号 > 285 的成品，奇数 id 的块要先把第 0 字节异或一下
 XOR_FIX_BUILD = 285
 
-#: 占位密钥（全 0）。真样本的密钥见模块说明，还没定下来。
+#: 占位密钥（全 0）。真样本请用 :func:`app_key`。
 DEFAULT_KEY = b""
 
 #: 给文档/CLI 用的一句话状态
-KEY_STATUS = "密钥推导未定，flag=3 块暂解不开（布局已确认）"
+KEY_STATUS = "密钥 = 应用名 + 编辑器工程路径（第二份样本对不上，要兜底）"
 
 
 class CryptoError(Exception):
@@ -84,6 +86,16 @@ def build_encryption(texts):
     for text in texts:
         raw.extend(key_string(text or ""))
     return make_key_combined(bytes(raw))
+
+
+def app_key(app_name, editor_file):
+    """成品里真正用得上的密钥：**应用名 + 编辑器里的工程路径**。
+
+    来源是成品里两个普通 zlib 块：0x2224（应用名）与 0x222E（编辑器里打开过的
+    ``.mfa`` 全路径）。实测 ``dtlg-v1.1.0.exe``：7 个 flag=3 块全部解开，
+    解出的长度与块头的声明长度逐块相等。
+    """
+    return build_encryption([app_name or "", editor_file or ""])
 
 
 def init_table(key):

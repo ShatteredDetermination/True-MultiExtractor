@@ -1994,3 +1994,40 @@ build_from_ccn 写完 mfa 顺手写清单，命令行打一行「清单: …」�
 
 下一轮：先把密钥定下来（找 NebulaFD 里 MakeKey 的调用点，或用成品里能读出的其它字符串），
 定下来之后帧头、图层、虚拟矩形、实例、事件、全局值全都能读 —— 收益最大的一步。
+
+------------------------------------------------------------
+0.19WIP Beta 00119（第 24 轮·续）：flag=3 的密钥找到了，帧头 / 图层 / 虚拟矩形全部解开
+
+上一段写「密钥未定」之后又试了一轮成品里能读出的其它字符串，命中了：
+密钥 = **应用名（0x2224）+ 编辑器里的工程全路径（0x222E）**。
+dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头声明长度逐块相等）。
+
+解出来的东西（32 位都核对过，不是猜）：
+  0x3334 16 B   宽 640 / 高 480 / 0 / 帧 flags 0x8020
+  0x3342 16 B   虚拟矩形 0,0,640,480；滚动区大的帧读作 0,0,1280,960（flash warning）
+  0x3341 40 B   图层 1 条：0x10 / 1.0 / 1.0 / 0 / 0 / 'Layer 1'；
+                'dtlg team presents' 那帧是三段：Main / Effects / Top
+  0x3337 1028 B 调色板 256 色 + 计数
+  0x3338 88 B / 0x333D 9548 B  实例与事件：数据解得出，字段还没拆
+
+代码改动：
+  1) crypto.app_key(app_name, editor_file) —— 密钥来源写明在 docstring 里，
+     KEY_STATUS 改成「已定，第二份样本对不上要兜底」；
+  2) mfa_build.read_ccn_frames_info() + CcnFrameInfo：一次扫描返回
+     帧名 / 宽高 / flags / 虚拟矩形 / 图层 / 是否解开；
+  3) build_from_ccn 用帧头尺寸写 MFA（解不开的帧回退应用窗口，notes 写明几帧没解开）；
+     BuildReport 增 frame_sizes / frame_layers / frame_rects / frames_decoded；
+     .mfa.json 增 frame_sizes / frame_rects / frame_layers 三张表；
+  4) ids.py 补 0x222E / 0x222F / 0x3333 / 0x3334 / 0x3335 / 0x3341 / 0x3342 常量。
+
+实测（dtlg-v1.1.0.exe，limit 图像 32）：
+  frames_decoded 31/31，帧尺寸都是 640×480，滚动区 1280×960 / 840×680 等，
+  图层名 Layer 1 / Main / Effects / Top；产物仍过 mfa.validate（零问题）。
+第二份样本 Undertale Last Breath Scrapped.dat：13 帧名字照旧，密钥对不上 →
+0/13 帧头解开，按窗口兜底，报告里写明。这一点没藏着。
+
+自测（单跑，没跑全量）：
+  test_crypto.py        44 项 / 4 段 全过（新增：密钥解真样本、帧头 640x480、Layer 1、虚拟矩形）
+  test_mfa_build.py     82 项 / 4 段 全过（新增 6 项：31/31 帧头、帧尺寸、矩形、滚动区、图层名、三层那帧）
+中途修掉一个自己写出来的 bug：payloads.get() 返回 None 时 _parse_frame_header 里 len(None) 崩，
+被上层 try 吞掉 → 第二份样本退化成 1 帧。加了 None 保护后恢复 13 帧，这条也进了测试。

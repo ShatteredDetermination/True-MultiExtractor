@@ -86,6 +86,13 @@ CHUNK_APP_HEADER = 8739          # 0x2223
 CHUNK_APP_NAME = 8740            # 0x2224
 CHUNK_APP_AUTHOR = 8741          # 0x2225
 CHUNK_APP_COPYRIGHT = 8763       # 0x223B
+CHUNK_APP_EDITOR = 8750        # 0x222E 编辑器里打开过的 .mfa 全路径（flag=3 的密钥之一）
+CHUNK_APP_TARGET = 8751        # 0x222F 上次构建的目标文件路径
+CHUNK_FRAME = 13107            # 0x3333 帧容器
+CHUNK_FRAME_HEADER = 13108     # 0x3334 帧头（flag=3）
+CHUNK_FRAME_NAME = 13109       # 0x3335 帧名
+CHUNK_FRAME_LAYERS = 13121     # 0x3341 图层（flag=3）
+CHUNK_FRAME_RECT = 13122       # 0x3342 编辑器里的虚拟矩形（flag=3）
 CHUNK_25_OBJECT_HEADERS = 8787   # 0x2253 出现即说明是 2.5+
 CHUNK_FONT_INFO = 8792           # 0x2258
 CHUNK_FONTS_2 = 8793             # 0x2259

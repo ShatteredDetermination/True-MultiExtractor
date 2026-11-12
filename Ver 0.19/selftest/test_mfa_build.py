@@ -193,6 +193,20 @@ def test_end_to_end():
               "帧尺寸取应用窗口", f"{pr.frames[0].width}x{pr.frames[0].height}")
         check(pr.frames[0].last_x == w // 2 and pr.frames[0].last_y == h // 2,
               "最后查看点落在画面中心")
+        check(rep.frames_decoded == rep.frames,
+              f"逐帧帧头都解开了（{rep.frames_decoded}/{rep.frames}）",
+              f"{rep.frames_decoded}/{rep.frames}")
+        check(all(sz == (w, h) for sz in rep.frame_sizes),
+              "每帧尺寸与帧头一致", f"{rep.frame_sizes[:3]}")
+        check(rep.frame_rects and rep.frame_rects[0] == (0, 0, w, h),
+              "第一帧虚拟矩形 = 窗口", f"{rep.frame_rects[:1]}")
+        check(any(r[2] > w or r[3] > h for r in rep.frame_rects),
+              "有帧的滚动区比窗口大（0x3342 解出来了）",
+              f"{[r for r in rep.frame_rects if r[2] > w][:2]}")
+        check(rep.frame_layers[0] and rep.frame_layers[0][0][0] == "Layer 1",
+              "第一帧图层名 = Layer 1", f"{rep.frame_layers[0]}")
+        check(len(rep.frame_layers[2]) == 3,
+              "第 3 帧有 3 层（Main / Effects / Top）", f"{rep.frame_layers[2]}")
         check(len(pr.layout.banks.sounds) == rep.sounds_written > 0,
               f"音频带上 {rep.sounds_written} 条",
               f"{len(pr.layout.banks.sounds)}")
@@ -307,6 +321,8 @@ def test_second_sample():
         check(rep.icons >= 1, f"图标 {rep.icons} 个")
         check(rep.images_written == 16 and rep.sounds_written > 0,
               f"图像 {rep.images_written}、音频 {rep.sounds_written}")
+        print(f"  [info] 第二份样本帧头解开 {rep.frames_decoded}/{rep.frames} 帧"
+              f"（密钥 = 应用名 + 编辑器工程路径，这份对不上就按窗口兜底）")
 
 
 def main() -> int:

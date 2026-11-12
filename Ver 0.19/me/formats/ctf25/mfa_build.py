@@ -8,21 +8,23 @@
 能被我们自己的 `mfa.read_project` 读回来的 `.mfa`。
 
 **还做不到**：帧内对象 / 实例 / 事件的重建。所以产出的工程里帧是骨架自带的
-空帧（尺寸、背景色取自骨架），**不是**原游戏的布局。这一点不许在对外说明里
+空帧：帧名、宽高（帧头 `0x3334`，flag=3 现在能解开）、最后查看点取自成品，
+对象与事件仍是空的，**不是**原游戏的布局。这一点不许在对外说明里
 含糊：产物是「资源级 mfa」，能打开、能看到图像资源，但看不到原游戏的摆位。
 
 图像编码：成品 2.5+ 的图像解成 RGBA（`imagecodec.to_rgba`），写进 MFA 时
 按 32 位条目（`graphic_mode = 8`）存 BGRA、zlib 压缩。
 """
 
+import struct
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from me.formats.ctf25 import container, imagebank, imagecodec
 from me.formats.ctf25 import chunks as chunk_mod
-from me.formats.ctf25 import ids, mfa
+from me.formats.ctf25 import crypto, ids, mfa
 
 
 class MfaBuildError(Exception):
@@ -46,6 +48,11 @@ class BuildReport:
     images_skipped: int = 0
     frames: int = 0
     frame_names: List[str] = field(default_factory=list)
+    frame_sizes: List[Tuple[int, int]] = field(default_factory=list)
+    frame_layers: List[List[Tuple[str, int, float, float]]] = field(
+        default_factory=list)
+    frame_rects: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    frames_decoded: int = 0
     objects: int = 0
     object_names: List[str] = field(default_factory=list)
     object_types: dict = field(default_factory=dict)
@@ -148,10 +155,10 @@ def to_mfa_image(entry) -> mfa.MfaImage:
 
 
 def read_ccn_frames(ccn_path):
-    """读成品里每帧的**帧名**（0x3335 是普通 zlib chunk，读得出来）。
+    """只读每帧的**帧名**（0x3335，普通 zlib chunk）。
 
-    帧头（0x3334）在 2.5+ 里是 flag=3（zlib + 加密），数据是异或过的，
-    所以宽高/背景色现在读不出来 —— 这里只返回名字，不猜尺寸。
+    帧头 / 图层 / 虚拟矩形现在也读得出来了（flag=3 的密钥已定），见
+    :func:`read_ccn_frames_info`；这个函数保留给「只要名字」的调用点。
     """
     out = []
     mm, loc = container.open_file(ccn_path)
@@ -176,6 +183,129 @@ def read_ccn_frames(ccn_path):
                 name = ""
             out.append(name)
         return out
+    finally:
+        mm.close()
+
+
+@dataclass
+class CcnFrameInfo:
+    """成品里一帧能读出来的东西。
+
+    帧名（0x3335）是普通 zlib 块；帧头（0x3334）、图层（0x3341）、虚拟矩形
+    （0x3342）是 flag=3 块，要用「应用名（0x2224）+ 编辑器工程路径（0x222E）」
+    当密钥才解得开（见 `crypto.app_key`）。解不开时只有 `name` 有值，
+    `decoded` 为 False —— 转换器会照旧用应用窗口尺寸兜底，不瞎猜。
+    """
+
+    name: str = ""
+    width: int = 0
+    height: int = 0
+    flags: int = 0
+    rect: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    layers: List[Tuple[str, int, float, float]] = field(default_factory=list)
+    decoded: bool = False
+
+
+def _chunk_text(buf, ch, unicode_mode) -> str:
+    try:
+        data = chunk_mod.load(buf, ch)
+    except Exception:
+        return ""
+    if unicode_mode:
+        return data.decode("utf-16-le", "ignore").rstrip("\x00")
+    return data.decode("latin-1", "ignore").rstrip("\x00")
+
+
+def _parse_frame_header(data):
+    """0x3334 解出来是 16 B：宽 / 高 / 未知 / 帧标志。"""
+    if not data or len(data) < 16:
+        return None
+    width, height, _unk, flags = struct.unpack_from("<IIII", data, 0)
+    if not (0 < width <= 65535 and 0 < height <= 65535):
+        return None
+    return width, height, flags
+
+
+def _parse_frame_rect(data):
+    """0x3342 是编辑器里的虚拟矩形：左 / 上 / 右 / 下。"""
+    if not data or len(data) < 16:
+        return None
+    return struct.unpack_from("<iiii", data, 0)
+
+
+def _parse_frame_layers(data):
+    """0x3341：u32 条数，之后每条 ``u32 16 / f32 sx / f32 sy / u32 flags / u32 0``
+    + 不带长度前缀的 UTF-16 名字（``00 00`` 收尾）。"""
+    if not data or len(data) < 4:
+        return []
+    count = struct.unpack_from("<I", data, 0)[0]
+    if not (0 <= count <= 64):
+        return []
+    pos = 4
+    out = []
+    for _ in range(count):
+        if pos + 20 > len(data):
+            break
+        _unk, scale_x, scale_y, flags, _unk2 = struct.unpack_from(
+            "<IffII", data, pos)
+        pos += 20
+        end = pos
+        while end + 1 < len(data) and data[end:end + 2] != b"\x00\x00":
+            end += 2
+        name = data[pos:end].decode("utf-16-le", "ignore")
+        pos = end + 2
+        out.append((name, flags, scale_x, scale_y))
+    return out
+
+
+def read_ccn_frames_info(ccn_path):
+    """一次扫描读出所有帧：帧名 + 帧头 + 虚拟矩形 + 图层，外加解密密钥来源。"""
+    mm, loc = container.open_file(ccn_path)
+    if loc is None:
+        raise MfaBuildError("未找到 Clickteam CCN 数据（PAMU / PAME / CRUF）")
+    try:
+        buf = mm.mm
+        app_name = editor = ""
+        frame_chunks = []
+        for ch in chunk_mod.scan(buf, loc.chunk_start, len(buf)):
+            if ch.id == ids.CHUNK_APP_NAME:
+                app_name = _chunk_text(buf, ch, loc.unicode)
+            elif ch.id == ids.CHUNK_APP_EDITOR:
+                editor = _chunk_text(buf, ch, loc.unicode)
+            elif ch.id == ids.CHUNK_FRAME:
+                frame_chunks.append(ch)
+
+        key = crypto.app_key(app_name, editor)
+        infos = []
+        for frame in frame_chunks:
+            info = CcnFrameInfo()
+            payloads = {}
+            for s in chunk_mod.scan(buf, frame.data_offset,
+                                    frame.data_offset + frame.size):
+                if s.id == ids.CHUNK_FRAME_NAME:
+                    info.name = _chunk_text(buf, s, loc.unicode)
+                elif s.flag == 3 and s.id in (ids.CHUNK_FRAME_HEADER,
+                                              ids.CHUNK_FRAME_LAYERS,
+                                              ids.CHUNK_FRAME_RECT):
+                    body = buf[s.data_offset:s.data_offset + s.size]
+                    try:
+                        info_decl, data = crypto.decrypt_chunk_body(
+                            body, s.id, key=key)
+                    except crypto.CryptoError:
+                        continue
+                    if len(data) == info_decl:
+                        payloads[s.id] = data
+            header = _parse_frame_header(payloads.get(ids.CHUNK_FRAME_HEADER))
+            if header:
+                info.width, info.height, info.flags = header
+                info.decoded = True
+            rect = _parse_frame_rect(payloads.get(ids.CHUNK_FRAME_RECT))
+            if rect:
+                info.rect = rect
+            info.layers = _parse_frame_layers(
+                payloads.get(ids.CHUNK_FRAME_LAYERS, b""))
+            infos.append(info)
+        return infos
     finally:
         mm.close()
 
@@ -440,12 +570,20 @@ def write_manifest(path, rep: "BuildReport", table=None) -> str:
             "objects": rep.objects,
         },
         "frames": list(rep.frame_names),
+        "frame_sizes": [list(sz) for sz in rep.frame_sizes],
+        "frame_rects": [list(r) for r in rep.frame_rects],
+        "frame_layers": [
+            [{"name": name, "flags": flags, "scale_x": round(sx, 4),
+              "scale_y": round(sy, 4)}
+             for (name, flags, sx, sy) in layers]
+            for layers in rep.frame_layers
+        ],
         "object_types": {str(k): v for k, v in (rep.object_types or {}).items()},
         "objects": ([{"index": o.index, "name": o.name, "type": o.type_id,
                       "flag": o.flag} for o in table.objects] if table else []),
         "notes": list(rep.notes),
         "not_reconstructed": [
-            "帧内图层 / 对象实例 / 事件（成品帧头是 flag=3 加密块）",
+            "帧内对象实例与事件（帧头已解开：宽高、虚拟矩形、图层已取；实例 / 事件未拆）",
             "对象仍未写进 MFA 的对象 chunk 列表",
         ],
     }
@@ -594,10 +732,11 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
 
     if frame_names:
         try:
-            names = read_ccn_frames(ccn_path)
+            infos = read_ccn_frames_info(ccn_path)
         except Exception as exc:
-            names = []
-            rep.notes.append(f"帧名读不出来：{exc}")
+            infos = []
+            rep.notes.append(f"帧头读不出来：{exc}")
+        names = [info.name for info in infos]
         try:
             app = read_ccn_app(ccn_path)
             rep.width, rep.height = app.width, app.height
@@ -608,25 +747,34 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                                  f"{len(names)} 帧")
         except Exception as exc:
             rep.notes.append(f"应用尺寸读不出来：{exc}")
-        if names:
+        if infos:
             import copy
             base = pr.frames[0]
             pr.frames = []
-            for i, nm in enumerate(names):
+            for i, info in enumerate(infos):
                 f = copy.deepcopy(base)
                 f.handle = i
-                f.name = nm or f"Frame {i + 1}"
-                if rep.width and rep.height:
+                f.name = info.name or f"Frame {i + 1}"
+                if info.decoded:
+                    rep.frames_decoded += 1
+                    f.width, f.height = info.width, info.height
+                elif rep.width and rep.height:
                     f.width, f.height = rep.width, rep.height
-                    f.last_x, f.last_y = rep.width // 2, rep.height // 2
+                f.last_x, f.last_y = f.width // 2, f.height // 2
                 pr.frames.append(f)
+                rep.frame_sizes.append((f.width, f.height))
+                rep.frame_layers.append(list(info.layers))
+                rep.frame_rects.append(tuple(info.rect))
             rep.frame_names = [f.name for f in pr.frames]
-            if rep.width and rep.height:
+            if rep.frames_decoded:
                 rep.notes.append(
-                    f"帧尺寸取应用窗口 {rep.width}x{rep.height}"
-                    "（成品帧头是 flag=3 加密块，逐帧宽高读不出）")
-            else:
-                rep.notes.append("帧尺寸取骨架；成品帧头是 flag=3 加密块")
+                    f"帧头解密成功 {rep.frames_decoded}/{len(pr.frames)} 帧，"
+                    "尺寸与图层按帧头（密钥 = 应用名 + 编辑器工程路径）")
+            if rep.frames_decoded < len(pr.frames):
+                missing = len(pr.frames) - rep.frames_decoded
+                rep.notes.append(
+                    f"还有 {missing} 帧的帧头没解开（flag=3 密钥对不上），"
+                    "这几帧尺寸按应用窗口兜底")
     rep.frames = len(pr.frames)
 
     table = None
