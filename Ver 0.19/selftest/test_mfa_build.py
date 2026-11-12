@@ -217,6 +217,17 @@ def test_end_to_end():
               "第一帧图层名 = Layer 1", f"{rep.frame_layers[0]}")
         check(len(rep.frame_layers[2]) == 3,
               "第 3 帧有 3 层（Main / Effects / Top）", f"{rep.frame_layers[2]}")
+        check(rep.layers_written >= rep.frames,
+              f"图层写进 {rep.layers_written} 层（≥ 帧数 {rep.frames}）",
+              f"{rep.layers_written}")
+        got_layers = [[ly.name for ly in fr.layers] for fr in pr.frames]
+        check(got_layers[0] == ["Layer 1"], "第一帧图层 = Layer 1",
+              f"{got_layers[0]}")
+        check(got_layers[2] == ["Main", "Effects", "Top"],
+              "第 3 帧三层 = Main / Effects / Top", f"{got_layers[2]}")
+        check(all(abs(ly.scale_x - 1.0) < 1e-6 and ly.flags == 1
+                  for fr in pr.frames for ly in fr.layers),
+              "图层缩放都是 1.0、flags 都是 1")
         check(rep.instances_total == sum(rep.instances_by_frame) > 1000,
               f"实例总数 {rep.instances_total} 条，逐帧加起来对得上",
               f"{rep.instances_by_frame[:5]}")

@@ -402,7 +402,9 @@ MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
 （zlib + 加密）的帧头 `0x3334`、虚拟矩形 `0x3342`、图层 `0x3341` 在密钥
 「应用名（`0x2224`）+ 编辑器工程路径（`0x222E`）」下定出来了，实测 dtlg 31/31 帧
 （`start` 640×480，`flash warning` 滚动区 1280×960，图层 `Layer 1` / `Main`+`Effects`+`Top`）。
-写进 mfa 的是帧宽高与滚动区（帧尾 `0x21` chunk）；图层名只进清单，还没写进帧。
+写进 mfa 的是帧宽高、滚动区（帧尾 `0x21` chunk）与**图层**（名字 / 缩放，
+flags 统一写 1=可见：CCN 那一格读出来是 0，含义还没定）；实测 31 帧共 39 层，
+`dtlg team presents` 是 `Main` + `Effects` + `Top` 三层。
 
 **对象与实例要显式打开**：默认产物仍是骨架空帧（`--mfa` 不加参数）；加
 `--mfa-objects` 会把成品的对象定义与 1,562 条实例位置写进帧体 —— 但对象是**占位**：

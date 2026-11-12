@@ -55,6 +55,7 @@ class BuildReport:
     instances_by_frame: List[int] = field(default_factory=list)
     frame_instances: List[List["CcnInstance"]] = field(default_factory=list)
     instances_total: int = 0
+    layers_written: int = 0
     objects_written: int = 0
     instances_written: int = 0
     instances_skipped: int = 0
@@ -662,6 +663,7 @@ def write_manifest(path, rep: "BuildReport", table=None) -> str:
         "frame_sizes": [list(sz) for sz in rep.frame_sizes],
         "frame_rects": [list(r) for r in rep.frame_rects],
         "instances_total": rep.instances_total,
+        "layers_written": rep.layers_written,
         "objects_written": rep.objects_written,
         "instances_written": rep.instances_written,
         "instances_skipped": rep.instances_skipped,
@@ -862,6 +864,12 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                         rep.frame_rects_written += 1
                     except mfa.MfaError as exc:
                         rep.notes.append(f"帧 {f.name!r} 的虚拟矩形没写进去：{exc}")
+                if info.decoded and info.layers:
+                    f.layers = [
+                        mfa.MfaLayer(name=nm or f"Layer {i + 1}", flags=1,
+                                     scale_x=sx, scale_y=sy)
+                        for i, (nm, _flags, sx, sy) in enumerate(info.layers)]
+                    rep.layers_written += len(f.layers)
                 if objects and info.instances:
                     try:
                         events_raw, chunks_raw = mfa_objects.split_rest(f.rest_raw)
@@ -888,6 +896,10 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 rep.notes.append(
                     f"帧头解密成功 {rep.frames_decoded}/{len(pr.frames)} 帧，"
                     "尺寸与图层按帧头（密钥 = 应用名 + 编辑器工程路径）")
+            if rep.layers_written:
+                rep.notes.append(
+                    f"图层写进 MFA {rep.layers_written} 层（名字与缩放取自成品；"
+                    "flags 用 1=可见，CCN 那一格的含义未定）")
             if rep.objects_written:
                 rep.notes.append(
                     f"对象写了 {rep.objects_written} 个（占位：只有类型/名字/图标，"
