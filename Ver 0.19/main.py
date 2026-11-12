@@ -77,6 +77,9 @@ def _build_parser() -> "_Parser":
                     help="第三方 mfa 导出工具路径（也可用 ME_MFA_TOOL）")
     ap.add_argument("--mfa-template", metavar="PATH",
                     help="自研转换用的骨架 MFA（也可用 ME_MFA_TEMPLATE）")
+    ap.add_argument("--mfa-objects", action="store_true",
+                    help="实验性：把成品里的对象定义与实例位置写进 mfa"
+                         "（对象属性是占位默认值，扩展对象不写）")
     ap.add_argument("--mfa-check", metavar="PATH",
                     help="只体检一个 .mfa：结构是否自洽（自研/第三方产物都能查）")
     ap.add_argument("--tools", action="store_true", help="检查外部 CLI 是否齐全")
@@ -817,7 +820,8 @@ def cmd_mfa(target, args) -> int:
     if template and not args.mfa_tool:
         from me.formats.ctf25 import mfa_build
         try:
-            rep = mfa_build.build_from_ccn(target, out, template)
+            rep = mfa_build.build_from_ccn(
+                target, out, template, objects=bool(getattr(args, "mfa_objects", False)))
         except Exception as exc:                 # 自研失败就退第三方
             reason = f"自研通道失败：{exc}"
             ui.warn(reason)
@@ -838,8 +842,15 @@ def cmd_mfa(target, args) -> int:
                 ui.detail(f"跳过: {note}")
             if rep.manifest:
                 ui.detail(f"清单: {rep.manifest}")
-            ui.warn("帧内对象与事件还没有重建，帧是骨架自带的空帧；"
-                    "原游戏布局不会出现在这份 mfa 里。")
+            if rep.objects_written:
+                ui.detail(f"占位对象 {rep.objects_written} 个、实例 "
+                          f"{rep.instances_written} 条"
+                          f"（跳过 {rep.instances_skipped} 条扩展对象）")
+                ui.warn("对象是占位：只有类型/名字/图标，Active 没有动画、"
+                        "String 没有文字、Counter 没有外观；事件还没有重建。")
+            else:
+                ui.warn("帧内对象与事件还没有重建，帧是骨架自带的空帧；"
+                        "原游戏布局不会出现在这份 mfa 里。")
             events.emit("mfa", ok=True, channel="self", reason="ok",
                         out=rep.out, size=rep.out_size,
                         images=rep.images_written, images_total=rep.images_total,

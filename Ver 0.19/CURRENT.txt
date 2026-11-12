@@ -2088,3 +2088,36 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
    test_mfa_build.py 见本轮日志（新增 3 项：写进 31 帧、逐帧与成品一致、滚动区比窗口大）
 
 下一步不变：对象加载器（Active / String / Counter / 扩展）→ 实例写进帧体 → 事件树。
+
+------------------------------------------------------------
+0.19WIP Beta 00123（第 27 轮）：占位对象 + 实例写进 mfa（--mfa-objects，实验性）
+
+1）查清了 MFA 对象加载器的布局（公开文档 + 参考样本核对）：
+   - CObjectInfo 头：类型 / 句柄 / CString 名字 / 透明 / 墨迹 / 墨迹参数 / 抗锯齿 /
+     对象标志（0x20）/ 图标类型（必须 1）/ 图标句柄 / u8 0 收尾 / 加载器；
+   - 加载器公共段 48 B：两套 flags + 背景色 + 9 个限定符 + 4 个空表 + 两个转场开关；
+   - 按类型的私有段：Active 只有「有没有动画」1 字节、String 宽高字体颜色标志段数、
+     Counter 值/最小/最大/显示类型/填充/两色/方向/宽高/图片数/字体；
+   - 文件夹：每个对象一个隐藏文件夹（`70 00 00 03` + i32 子对象）；
+   - 实例 32 B：x / y / 图层 / 句柄 / 标志 / 实例值 / ParentType / ObjectInfo / ParentHandle。
+
+2）新增 me/formats/ctf25/mfa_objects.py：
+   build_object_info / build_loader / build_folders / build_instance /
+   build_frame_objects / build_frame_rest / split_rest。
+   只写类型 2/3/7（Active / String / Counter），扩展对象（>=32）返回 None 并跳过。
+
+3）build_from_ccn 增 objects=False 参数；CLI 增 --mfa-objects（默认关）。
+   打开后：每帧按实例表写对象定义 + 隐藏文件夹 + 实例，帧头的对象数一并改，
+   事件段与帧尾 chunk 列表原样保留（虚拟矩形仍在）。
+
+4）实测 dtlg-v1.1.0.exe（limit 图像 4）：写 1,249 个占位对象、1,249 条实例，
+   跳过 313 条扩展对象实例；各帧对象数 [1,1,8,7,3,12,...]，帧头对象数之和 =
+   写入对象数；validate 零问题。对象是**占位**：Active 没动画、String 没文字、
+   Counter 没外观 —— 报告与 CLI 输出都这么写。
+
+5）自测（单跑）：
+   selftest/test_mfa_objects.py  38 项 / 4 段全过（对象块长度与头字段、三类加载器、
+   文件夹/实例字节、帧体拼装、模板帧体拆段、端到端 1,249 对象 + 1,249 实例 + 体检）
+
+下一步：把私有段的真值从成品对象属性里取出来替换占位值；然后事件树。
+仍等 Fusion 2.5 打开演示 mfa 的结果。

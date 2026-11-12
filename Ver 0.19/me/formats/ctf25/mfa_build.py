@@ -24,7 +24,7 @@ from typing import Callable, List, Optional, Tuple
 
 from me.formats.ctf25 import container, imagebank, imagecodec
 from me.formats.ctf25 import chunks as chunk_mod
-from me.formats.ctf25 import crypto, ids, mfa
+from me.formats.ctf25 import crypto, ids, mfa, mfa_objects
 
 
 class MfaBuildError(Exception):
@@ -55,6 +55,9 @@ class BuildReport:
     instances_by_frame: List[int] = field(default_factory=list)
     frame_instances: List[List["CcnInstance"]] = field(default_factory=list)
     instances_total: int = 0
+    objects_written: int = 0
+    instances_written: int = 0
+    instances_skipped: int = 0
     frame_rects_written: int = 0
     frames_decoded: int = 0
     objects: int = 0
@@ -659,6 +662,9 @@ def write_manifest(path, rep: "BuildReport", table=None) -> str:
         "frame_sizes": [list(sz) for sz in rep.frame_sizes],
         "frame_rects": [list(r) for r in rep.frame_rects],
         "instances_total": rep.instances_total,
+        "objects_written": rep.objects_written,
+        "instances_written": rep.instances_written,
+        "instances_skipped": rep.instances_skipped,
         "instances": _manifest_instances(rep),
         "frame_layers": [
             [{"name": name, "flags": flags, "scale_x": round(sx, 4),
@@ -739,6 +745,7 @@ def to_mfa_font(meta, data: bytes) -> mfa.FontEntry:
 
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                    limit: Optional[int] = None, frame_names: bool = True,
+                   objects: bool = False,
                    progress: Optional[Callable] = None) -> BuildReport:
     """骨架级转换：应用信息 + 图像库 从成品搬进骨架，写出 ``out_path``。"""
     template_path = Path(template_path) if template_path else DEFAULT_TEMPLATE
@@ -855,6 +862,20 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                         rep.frame_rects_written += 1
                     except mfa.MfaError as exc:
                         rep.notes.append(f"帧 {f.name!r} 的虚拟矩形没写进去：{exc}")
+                if objects and info.instances:
+                    try:
+                        events_raw, chunks_raw = mfa_objects.split_rest(f.rest_raw)
+                        blobs, handles, inst_blobs, skipped = \
+                            mfa_objects.build_frame_objects(info.instances)
+                        if handles:
+                            f.rest_raw = mfa_objects.build_frame_rest(
+                                blobs, handles, inst_blobs, events_raw, chunks_raw)
+                            f.object_count = len(blobs)   # 帧头里的对象数要跟着改
+                            rep.objects_written += len(handles)
+                            rep.instances_written += len(inst_blobs)
+                            rep.instances_skipped += skipped
+                    except Exception as exc:
+                        rep.notes.append(f"帧 {f.name!r} 的对象没写进去：{exc}")
                 pr.frames.append(f)
                 rep.frame_sizes.append((f.width, f.height))
                 rep.frame_layers.append(list(info.layers))
@@ -867,6 +888,12 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                 rep.notes.append(
                     f"帧头解密成功 {rep.frames_decoded}/{len(pr.frames)} 帧，"
                     "尺寸与图层按帧头（密钥 = 应用名 + 编辑器工程路径）")
+            if rep.objects_written:
+                rep.notes.append(
+                    f"对象写了 {rep.objects_written} 个（占位：只有类型/名字/图标，"
+                    "Active 无动画、String 无文字、Counter 无外观）、"
+                    f"实例 {rep.instances_written} 条，跳过 {rep.instances_skipped} 条"
+                    "（扩展对象未支持）")
             if rep.frame_rects_written:
                 rep.notes.append(
                     f"虚拟矩形写进 MFA {rep.frame_rects_written} 帧"

@@ -24,6 +24,7 @@ MultiExtractorCLI.exe [<target>] [选项...]
 | `--keep-work` | 开关 | 关 | 保留 `work/` 中间产物 |
 | `--detect` | 开关 | 关 | 只识别引擎，不提取；需要 `<target>` |
 | `--mfa` | 输出文件路径 | 无 | 把成品导成 `.mfa`：给了骨架就走自研转换，否则走第三方工具；需要 `<target>` |
+| `--mfa-objects` | 无 | 关 | 实验性：把对象定义与实例位置写进 mfa；对象是占位（Active 无动画、String 无文字、扩展对象不写） |
 | `--mfa-check` | MFA 路径 | 无 | 只体检一个 `.mfa`：结构自洽、条数对得上、帧偏移递增、chunk 列表收到文件尾、整份能逐字节重建；有问题退出码 3 |
 | `--mfa-template` | MFA 路径 | `ME_MFA_TEMPLATE` | 自研转换的骨架 mfa；资源级产物（图像 + 工程名），帧是骨架空帧 |
 | `--mfa-tool` | 工具路径 | `ME_MFA_TOOL` | 第三方 mfa 导出工具；参数模板见 `ME_MFA_TOOL_ARGS`（默认 `{in} {out}`） |
