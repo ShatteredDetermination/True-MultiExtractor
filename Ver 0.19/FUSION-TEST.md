@@ -8,6 +8,13 @@
 ```
 C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\DustTale-demo.mfa
 （17,618,543 B；同目录还有 DustTale-demo.mfa.json 清单）
+
+另外两个（建议先开最下面的小文件，再开大的）：
+
+* DustTale-demo-objects.mfa（17,850,824 B）—— 同上，但**带对象与实例**
+  （1,249 个对象 / 1,249 条实例，String 带正文、Counter 带 14 张数字图；
+  扩展对象的 313 条实例跳过）；
+* min-object.mfa（194,487 B）—— 最小对象件：模板 + 3 个对象 + 3 条实例。
 ```
 
 来源：`dtlg-v1.1.0.exe`（144 MB）→ 自研通道导出，图像限 32 张、音频 32 段，
@@ -40,6 +47,20 @@ C:\Users\Administrator\Desktop\MultiExtractorDeveloping\_out\fusion-test\min-obj
 图标，加载器是空壳）；反过来都打不开，问题在更外层的容器或资源库。
 这个文件就是 `mfa_objects.add_objects_to_frame()` 把 3 个对象塞进 `Template.mfa` 的产物
 （Active / String / Counter 各一个，实例分别摆在 100,120 / 320,240 / 500,300；String 那个带正文 `Hello from MultiExtractor`）。
+
+## 三号测试件（对象 + 正文 + 计数器）
+
+`
+_out\fusion-test\DustTale-demo-objects.mfa   17,850,824 B
+`
+
+31 帧、1,249 个对象（含 3 类内置对象）与 1,249 条实例位置；String 对象带正文
+（例如 start 帧的 Ini、	extbox string），Counter 带 14 张数字图；
+**Active 对象没有动画帧**（动画还没解出来），扩展对象跳过。看点：
+
+1. 能不能打开（这是重点，Active 空动画有可能让编辑器报错）；
+2. 打开后各帧里能不能看到对象小方块/文字/数字；
+3. 文字是否显示成原游戏的句子（如 - GAME CONTROLS -、Yes、Continue）。
 
 ## 请回报的三件事
 
