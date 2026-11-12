@@ -67,3 +67,20 @@ V0.17 起每种引擎都提供两条通道：**自研解析**与**第三方工�
 AssetStudio / repak / evbunpack 均为宽松协议：保留许可证与被许可方声明即可。
 `tools/repak/` 已带两个 LICENSE 文件；`tools/assetstudio/` 和
 `tools/evbunpack/` 上游未随包放许可证文件，自上游仓库的 `LICENSE` 复制一份。
+
+---
+
+## 参考资料（只读对照，未引入代码）
+
+V0.19 做 MFA 导出时，为了核对字段顺序和加密流程，读过这些公开资料：
+
+| 资料 | 用途 | 协议 |
+|---|---|---|
+| https://mfa.ilikefemboys.com/ （MFA File Structure，作者 Yunivers） | `.mfa` 各段的字段顺序（CObjectInfo、CChunk、应用设置等） | 文档 |
+| https://github.com/AITYunivers/NebulaFD | MFA 读写与 CCN 解密的流程对照 | 见上游仓库 |
+| https://github.com/CTFAK/CTFAK | 同上（历史实现，仅对照） | AGPL-3.0 |
+
+用法边界与上表一致：**只看结构与算法，不复制源码、不链接其库**。`me/` 下没有
+上述项目的代码；`me/formats/ctf25/crypto.py` 是把「RC4 变体 + zlib」的流程用
+标准库 Python 重写的（KSA/PRGA 各十来行），与上游实现不构成衍生关系。
+
