@@ -89,8 +89,12 @@ def test_capabilities():
     ctf = actions(menu_flow.main_options(sess_for("clickteam")))
     check(menu_flow.REPAIR_MENU not in ctf, "CTF 不给修复/重建（只对 GM 有意义）")
     check(menu_flow.CHANNEL_MENU not in ctf, "CTF 不给通道切换（没有第三方）")
-    check(ctf == [menu_flow.EXTRACT, menu_flow.DETAIL, menu_flow.PATH,
+    check(ctf == [menu_flow.EXTRACT, menu_flow.MFA, menu_flow.DETAIL, menu_flow.PATH,
                   menu_flow.MORE, menu_flow.EXIT], f"CTF 菜单 {ctf}")
+    check(menu_flow.MFA not in actions(menu_flow.main_options(sess_for("gamemaker"))),
+          "GameMaker 不给导出 mfa")
+    check(menu_flow.mfa_supported("clickteam") and not menu_flow.mfa_supported("godot"),
+          "mfa_supported 只认 clickteam")
 
     godot = actions(menu_flow.main_options(sess_for("godot")))
     check(menu_flow.CHANNEL_MENU not in godot, "Godot 不给通道切换（没有第三方）")
@@ -202,11 +206,12 @@ def test_argv_roundtrip():
 def test_handlers():
     section("E. 每个菜单动作都有处理分支")
     src = (ROOT / "main.py").read_text(encoding="utf-8")
-    for const in ("ANALYZE", "EXTRACT", "REPAIR_MENU", "CHANNEL_MENU",
+    for const in ("ANALYZE", "EXTRACT", "MFA", "REPAIR_MENU", "CHANNEL_MENU",
                   "DETAIL", "PATH", "MORE", "EXIT"):
         check(f"menu_flow.{const}" in src, f"{const} 在主循环里有分支")
 
-    for fn in ("build_extract_argv", "build_repair_argv", "_run_argv", "_analyze",
+    for fn in ("build_extract_argv", "build_repair_argv", "build_mfa_argv",
+               "_run_argv", "_analyze", "_menu_mfa",
                "extract_options", "repair_options", "channel_options",
                "more_options", "pre_analyze_options", "main_options"):
         check(fn in src, f"main.py 用到了 {fn}")
@@ -222,6 +227,20 @@ def test_handlers():
         check(f'"{key}"' in chan_body, f"通道菜单「{key}」有分支")
 
     check("_menu_engine(" in src, "「指定引擎（-e）」有入口")
+    check("build_mfa_argv" in src, "「导出 mfa」有入口")
+
+
+# ---------------------------------------------------------------- F2 mfa 参数
+def test_mfa_argv():
+    section("F2. 导出 mfa 的参数拼装")
+    sess = sess_for("clickteam")
+    argv = menu_flow.build_mfa_argv(sess, r"D:\out\a.mfa", r"D:\tpl.mfa")
+    check(argv == [sess.target, "--mfa", r"D:\out\a.mfa",
+                   "--mfa-template", r"D:\tpl.mfa"], f"argv {argv}")
+    argv2 = menu_flow.build_mfa_argv(sess, r"D:\out\a.mfa", r"D:\tpl.mfa", objects=True)
+    check(argv2[-1] == "--mfa-objects", "objects=True 才追加 --mfa-objects")
+    argv3 = menu_flow.build_mfa_argv(sess, "a.mfa", "")
+    check("--mfa-template" not in argv3, "没骨架就不拼 --mfa-template")
 
 
 # ---------------------------------------------------------------- G 文案规则
@@ -344,6 +363,7 @@ def main() -> int:
         test_argv_roundtrip()
         test_handlers()
         test_wording()
+        test_mfa_argv()
         test_live(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

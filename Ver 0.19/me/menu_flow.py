@@ -29,6 +29,7 @@ from me import channel
 # ---- 动作常量（菜单只产出这些，不直接调函数）
 ANALYZE = "analyze"
 EXTRACT = "extract"
+MFA = "mfa"
 REPAIR_MENU = "repair_menu"
 CHANNEL_MENU = "channel_menu"
 DETAIL = "detail"
@@ -51,6 +52,7 @@ EXTRACT_ITEMS: Tuple[Tuple[str, Optional[set]], ...] = (
 )
 
 REPAIR_ENGINES = ("gamemaker",)
+MFA_ENGINES = ("clickteam",)
 
 
 @dataclass
@@ -78,6 +80,11 @@ class Session:
 def repair_supported(engine_key: str) -> bool:
     """修复/重建只对 GameMaker 有意义。"""
     return (engine_key or "") in REPAIR_ENGINES
+
+
+def mfa_supported(engine_key: str) -> bool:
+    """导出 mfa 只对 Clickteam Fusion 有意义。"""
+    return (engine_key or "") in MFA_ENGINES
 
 
 def channel_switchable(engine_key: str) -> bool:
@@ -143,6 +150,8 @@ def main_options(session: Session) -> List[Tuple[str, str]]:
     """分析完成后的主菜单：按引擎能力动态生成。"""
     items: List[Tuple[str, str]] = [("提取资源", EXTRACT)]
     key = session.effective_engine
+    if mfa_supported(key):
+        items.append(("导出 mfa", MFA))
     if repair_supported(key):
         items.append(("修复重建", REPAIR_MENU))
     if channel_switchable(key):
@@ -241,4 +250,15 @@ def build_detect_argv(session: Session) -> List[str]:
     argv = [session.target, "--detect"]
     if session.forced:
         argv += ["-e", session.forced]
+    return argv
+
+
+def build_mfa_argv(session: Session, out: str, template: str,
+                   objects: bool = False) -> List[str]:
+    """导出 mfa：目标 + 输出 + 骨架（+ 对象）。"""
+    argv = [session.target, "--mfa", out]
+    if template:
+        argv += ["--mfa-template", template]
+    if objects:
+        argv.append("--mfa-objects")
     return argv

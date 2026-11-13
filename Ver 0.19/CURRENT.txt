@@ -2377,3 +2377,15 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
    test_softkey 80 项、test_version_rule 22 项全过。
 4）版本线回到 0.19WIP Beta 00136；仓库里的发行相关文件回到开发中状态
    （RELEASE-0.19R.md 草稿 + FUSION-TEST.md 验收单都在）。
+
+0.19WIP Beta 00137（第 37 轮·续）：菜单里加了「导出 mfa」
+1）`me/menu_flow.py`：新动作 `MFA`、`mfa_supported()`（只认 clickteam）、
+   `build_mfa_argv(session, out, template, objects)`；`main_options` 在「提取资源」之后
+   插一项「导出 mfa」。
+2）`main.py::_menu_mfa()`：问 `mfa 输出路径`（默认 <输出目录>/<目标名>.mfa）、
+   问 `骨架 mfa 路径`（`ME_MFA_TEMPLATE` 有值就跳过）、问
+   `请选择是否写入对象与实例`（默认 N），然后走 `_run_argv`，和命令行同一条路。
+3）实测：dtlg 走菜单导出 → 139,235,427 B、1,515 图 / 172 音频 / 17 字体 / 31 帧，
+   工程名 `DustTale: Last Genocide`，清单写在同目录 `.mfa.json`。
+4）自测：test_cli_menu 160 项全过（新增 F2 段验 mfa 参数拼装；
+   CTF 菜单断言里加了 `mfa`，GameMaker/Godot 断言没有）。

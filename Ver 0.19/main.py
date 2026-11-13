@@ -1017,6 +1017,10 @@ def interactive(args) -> int:
             _menu_extract(sess)
             continue
 
+        if act == menu_flow.MFA:
+            _menu_mfa(sess)
+            continue
+
         if act == menu_flow.REPAIR_MENU:
             _menu_repair(sess)
             continue
@@ -1057,6 +1061,29 @@ def _menu_extract(sess) -> None:
         return
     cats = None if key == "cat:all" else set(key[4:].split(","))
     argv = menu_flow.build_extract_argv(sess, cats)
+    ui.detail("执行: " + " ".join(argv))
+    _run_argv(argv)
+
+
+def _menu_mfa(sess) -> None:
+    """导出 mfa：问输出路径、骨架，然后走 --mfa 同一条路。"""
+    ui.sep()
+    stem = Path(sess.target).stem
+    default_out = str(setup_ini.output_root() / f"{stem}.mfa")
+    out = ui.clean_input(ui.ask("mfa 输出路径", default_out))
+    if not out:
+        return
+
+    tpl = os.environ.get("ME_MFA_TEMPLATE", "")
+    if not tpl:
+        tpl = ui.clean_input(ui.ask("骨架 mfa 路径", ""))
+    if not tpl:
+        ui.warn("需要骨架 mfa")
+        return
+
+    ans = ui.clean_input(ui.ask("请选择是否写入对象与实例", "N"))
+    objects = ans.lower() in ("y", "yes", "是")
+    argv = menu_flow.build_mfa_argv(sess, out, tpl, objects)
     ui.detail("执行: " + " ".join(argv))
     _run_argv(argv)
 
