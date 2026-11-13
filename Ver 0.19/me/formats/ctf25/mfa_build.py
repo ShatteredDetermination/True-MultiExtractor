@@ -847,6 +847,28 @@ def to_mfa_font(meta, data: bytes) -> mfa.FontEntry:
     )
 
 
+def resolve_ccn(path) -> Path:
+    """把「文件或游戏目录」都收敛成那个带 CCN 的文件。
+
+    目录形态（scattered 发布）里 `Data.ini`、`.exe`、`.dat` 并存，
+    真正的 CCN 在 `.dat` 里；挑最大的那个能打开的文件。
+    """
+    p = Path(path)
+    if p.is_file():
+        return p
+    if not p.is_dir():
+        raise MfaBuildError(f"路径不存在：{p}")
+    from me.engines import clickteam
+
+    try:
+        files = clickteam.find_ctf_files(p)
+    except Exception:                                # noqa: BLE001
+        files = []
+    if not files:
+        raise MfaBuildError("目录里没有 CCN 成品（.dat / .ccn / .exe）")
+    return files[0]
+
+
 def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
                    limit: Optional[int] = None, frame_names: bool = True,
                    objects: bool = False,
@@ -855,8 +877,7 @@ def build_from_ccn(ccn_path, out_path, template_path=None, app_name: str = "",
     template_path = Path(template_path) if template_path else DEFAULT_TEMPLATE
     if not template_path.is_file():
         raise MfaBuildError(f"骨架 MFA 不存在：{template_path}")
-    if not Path(ccn_path).is_file():
-        raise MfaBuildError(f"成品不存在：{ccn_path}")
+    ccn_path = resolve_ccn(ccn_path)
 
     rep = BuildReport(ccn=str(ccn_path), template=str(template_path))
     (rep.app_name, rep.author, rep.copyright), entries, total = \

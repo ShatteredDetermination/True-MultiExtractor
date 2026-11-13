@@ -470,6 +470,31 @@ def test_second_sample():
               f"（密钥 = 应用名 + 编辑器工程路径，这份对不上就按窗口兜底）")
 
 
+def test_directory_target():
+    section("5. 目录形态目标（scattered 发布）")
+    DATA = Path(r"C:\拆包教程素材\目标游戏\Undertale Last Breath Scrapped BETA")
+    if not DATA.is_dir():
+        print("  [skip] 目录样本不在本机")
+        return
+
+    one = CCN_SAMPLES[0]
+    if one.is_file():
+        check(mfa_build.resolve_ccn(one) == one, "文件目标原样返回")
+
+    got = mfa_build.resolve_ccn(DATA)
+    check(got.is_file(), f"目录解析成文件：{got.name}")
+    check(got.suffix.lower() == ".dat" and got.stat().st_size > 60_000_000,
+          f"挑中的是 CCN 本体（{got.stat().st_size:,} B）")
+
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "dir.mfa"
+        rep = mfa_build.build_from_ccn(DATA, out, TEMPLATE, limit=8)
+        check(out.is_file() and out.read_bytes()[:4] == b"MFU2",
+              "目录目标也能产出 MFU2")
+        check(str(got) == rep.ccn, "报告里的成品路径是解析后的文件")
+        check(rep.images_written == 8, f"图像 {rep.images_written} 张")
+
+
 def main() -> int:
     print("=" * 66)
     print("  CCN -> MFA 骨架级转换自测")
@@ -484,6 +509,7 @@ def main() -> int:
     test_errors()
     test_end_to_end()
     test_second_sample()
+    test_directory_target()
     print("\n" + "=" * 66)
     print(f"  PASS {PASS}  FAIL {FAIL}")
     print("=" * 66)

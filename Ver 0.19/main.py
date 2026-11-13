@@ -1068,10 +1068,14 @@ def _menu_extract(sess) -> None:
 def _menu_mfa(sess) -> None:
     """导出 mfa：骨架找得到就直接用，找不到才问一次。"""
     ui.sep()
+    from me.formats.ctf25 import mfa_build as _mfa_build
     from me.formats.ctf25 import skeleton
 
-    stem = Path(sess.target).stem
-    default_out = str(setup_ini.output_root() / f"{stem}.mfa")
+    try:
+        data_file = _mfa_build.resolve_ccn(sess.target)
+    except Exception:                                  # noqa: BLE001
+        data_file = Path(sess.target)
+    default_out = str(setup_ini.output_root() / f"{data_file.stem}.mfa")
     out = ui.clean_input(ui.ask("mfa 输出路径", default_out))
     if not out:
         return

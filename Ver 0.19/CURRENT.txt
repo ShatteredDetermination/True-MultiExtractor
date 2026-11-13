@@ -2402,3 +2402,16 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
 4）实测：第一次手填 `C:\拆包教程素材\Clickteam MFA 样本\Template.mfa` → 写出
    139,235,427 B 的 mfa；再跑一遍，提示行默认值已是那个路径，回车就过。
 5）自测：test_cli_menu 160 项、test_softkey 80 项、test_mfa_build 120 项全过。
+
+0.19WIP Beta 00138（第 37 轮·续三）：目录目标能直接导出 mfa
+1）`mfa_build.resolve_ccn()`：文件原样返回；目录交给 `me.engines.clickteam.find_ctf_files()`
+   去挑（按体积降序、只认真含 CCN 的 .dat/.ccn/.exe）；挑不到就
+   `目录里没有 CCN 成品（.dat / .ccn / .exe）`。
+2）`build_from_ccn()` 入口先解析目标，报告里 `ccn` 写解析后的真实文件；
+   `_menu_mfa()` 的默认输出名也用解析后的文件名（不再是目录名）。
+   「成品不存在」那种死路现在走不到了 —— 上一轮点目录会直接报这个错。
+3）实测（Undertale Last Breath Scrapped BETA 目录，image limit 16）：解析到
+   `Undertale Last Breath Scrapped.dat`（66,376,710 B）→ 13 帧 / 275 对象 /
+   16 图 / 16 音频 / 5 字体，产物 1,691,183 B，`--mfa-check` 结构自洽。
+4）自测：test_mfa_build 126 项全过（新增第 5 段：文件原样返回、目录解析成 .dat、
+   目录目标产出 MFU2、报告路径是解析后的文件）。
