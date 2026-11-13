@@ -150,7 +150,7 @@ def download(ui, allow_package: Optional[bool] = None, only_cache: bool = False)
         if url.lower().endswith(".zip"):
             if allow_package is None:
                 ans = ui.clean_input(ui.ask(
-                    f"还要下全量包（约 140 MB）来补 {', '.join(still)} 吗？[Y/n]"))
+                    f"请选择是否下载全量包补 {', '.join(still)}", "Y"))
                 allow_package = ans.lower() not in ("n", "no", "不")
             if allow_package:
                 ui.step("下载全量包 ...")
@@ -187,7 +187,7 @@ def render(ui) -> str:
     ui.warn("未安装外部工具")
     ui.detail(mf.status_line(man))
     if man.full_package:
-        ui.detail(f"全量包: {man.full_package}")
+        ui.detail(f"{paths.package_note()}: {man.full_package}")
     ui.info("软键:")
     for key, label in KEYS:
         ui.detail(f"[{key}] {label}")

@@ -97,6 +97,8 @@ BUILTIN = Manifest(
     version="1",
     updated="2026-10-18",
     # 必须是能直接下的 zip（自动下载要用它兜底）；远端 tools.ini 会覆盖这里。
+    # 停在 v0.17R 是故意的：V0.18E 起主包是 Slim，不再带 tools/，最后一版真带
+    # 外部 CLI 的包就是它。别照着当前版本号把这里「升级」成 0.19E —— 那个包不存在。
     full_package="https://github.com/ShatteredDetermination/"
                  "True-MultiExtractor/releases/download/v0.17R/"
                  "MultiExtractor_0.17R.zip",

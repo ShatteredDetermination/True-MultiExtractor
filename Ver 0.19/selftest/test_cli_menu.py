@@ -69,11 +69,12 @@ def test_progressive():
     labels = [label for label, _a in items]
     check(not any("提取" in x for x in labels), "分析前没有「提取资源」")
     check(not any("修复" in x or "重建" in x for x in labels), "分析前没有「修复/重建」")
-    check(any("--detect" in x for x in labels), "有「分析目标（--detect）」入口")
+    check(not any("--" in x or "（" in x for x in labels),
+          "菜单项不带参数说明（--detect / 括号）")
 
     gm = menu_flow.main_options(sess_for("gamemaker"))
     check(actions(gm)[0] == menu_flow.EXTRACT, "分析之后第一项就是提取")
-    check(any("--detect" in x for x, _a in gm) is False, "分析之后不再要求分析")
+    check(not any("分析" in x for x, _a in gm), "分析之后不再出现「分析」")
 
 
 # ---------------------------------------------------------------- B 按能力生成
@@ -223,6 +224,27 @@ def test_handlers():
     check("_menu_engine(" in src, "「指定引擎（-e）」有入口")
 
 
+# ---------------------------------------------------------------- G 文案规则
+def test_wording():
+    section("G. 文案规则（提示语统一 / 菜单项不带参数说明）")
+    import re
+
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    prompts = re.findall(r'ui\.menu\(\s*"([^"]*)"', src)
+    check(len(prompts) == 7, f"main.py 里 7 处 ui.menu（{len(prompts)}）")
+    for p in prompts:
+        check(re.fullmatch(r"请选择[^（）()]{1,10}选项", p) is not None,
+              f"提示语是「请选择…选项」：{p}")
+
+    for fn in (menu_flow.pre_analyze_options, menu_flow.repair_options,
+               lambda: menu_flow.main_options(sess_for("gamemaker")),
+               lambda: menu_flow.channel_options(sess_for("gamemaker")),
+               lambda: menu_flow.more_options(sess_for("gamemaker"))):
+        for label, _a in fn():
+            check("--" not in label and "（" not in label,
+                  f"菜单项不带参数说明：「{label}」")
+
+
 # ---------------------------------------------------------------- F 真跑
 def _feed(target, engine_key, picks):
     """拼一段 stdin：路径 → 分析 → 各步。picks 是动作名，索引现算。"""
@@ -271,11 +293,11 @@ def test_live(tmp: Path):
     # F1 分析 → 退出：确认「分析之后才出现提取」，且不再问分析
     rc, out = _run(_feed(target, eng, [menu_flow.EXIT]))
     check(rc == 0, f"分析→退出 退出码 {rc}")
-    check("[0] 分析目标（--detect）" in out, "第一个菜单是「分析目标」")
-    check("[ok] [检测结果]" in out, "分析结果打出来了")
-    check("提取资源（--extract）" in out, "分析之后才出现提取")
-    banner = out.index("[ok] [检测结果]")
-    check(out.index("[0] 提取资源（--extract）") > banner,
+    check("[0] 分析" in out, "第一个菜单是「分析」")
+    check("[检测结果]" in out, "分析结果打出来了")
+    check("[0] 提取资源" in out, "分析之后才出现提取")
+    banner = out.index("[检测结果]")
+    check(out.index("[0] 提取资源") > banner,
           "提取项排在分析结果之后（不在分析前）")
 
     # F2 修复子菜单：只渲染，不执行
@@ -283,7 +305,7 @@ def test_live(tmp: Path):
         rc, out = _run(_feed(target, eng, [menu_flow.REPAIR_MENU,
                                           "back", menu_flow.EXIT]))
         check(rc == 0, f"修复子菜单 退出码 {rc}")
-        for word in ("全量重建", "原位补丁", "先重建再提取", "取消返回"):
+        for word in ("全量重建", "原位补丁", "先重建再提取", "返回"):
             check(word in out, f"修复子菜单有「{word}」")
         check("执行: " not in out, "选了「取消返回」就没真跑修复")
 
@@ -300,8 +322,8 @@ def test_live(tmp: Path):
         rc, out = _run(_feed(target, eng, [menu_flow.CHANNEL_MENU, "switch_self",
                                            menu_flow.EXIT]))
         check(rc == 0, f"通道切换 退出码 {rc}")
-        check("切换到" in out and "自研核心" in out, "通道菜单列出「切换到自研核心」")
-        check("当前: 自研" in out, "切完之后主菜单显示当前: 自研")
+        check("自研通道" in out, "通道菜单列出「自研通道」")
+        check("拆包通道: 自研" in out, "切完之后主菜单显示「拆包通道: 自研」")
 
     # F5 退出码：直接给退出，不该报错
     rc, out = _run(str(target) + "\n2\n", timeout=60)
@@ -321,6 +343,7 @@ def main() -> int:
         test_index_mapping()
         test_argv_roundtrip()
         test_handlers()
+        test_wording()
         test_live(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

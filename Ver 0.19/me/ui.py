@@ -115,19 +115,20 @@ def command(text: str):
     return _COMMAND_HOOK(text)
 
 
-def menu(title: str, options: list) -> int:
-    """显示菜单并返回用户选择的索引。
+def menu(prompt: str, options: list) -> int:
+    """显示选项并返回用户选择的索引。
 
     options: [(显示文字, 说明或 None), ...]
+    prompt 就是最后那一行「请选择…」，不再另外打一遍标题。
     返回的永远是 0..len(options)-1 —— 越界/非数字会重问，不会返回 -1；
     输入流结束（管道喂完）走 SystemExit(0)。
     """
     while True:
-        print(f"\n{title}")
+        print()
         for i, item in enumerate(options):
             label = item[0] if isinstance(item, (tuple, list)) else item
             print(f"  [{i}] {label}")
-        raw = ask("请选择")
+        raw = ask(prompt)
         # 斜杠指令：任何菜单里都能用，跑完重新画一遍菜单
         if raw.startswith("/"):
             if command(raw) == "quit":

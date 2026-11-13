@@ -267,7 +267,7 @@ def _ask_install_pending() -> object:
     """问一句要不要立刻装。返回 None=不装，或 EXIT_OK / EXIT_INTERNAL。"""
     from me import update as upd
 
-    ans = ui.clean_input(ui.ask("是否立即安装？(Y/N)", "N"))
+    ans = ui.clean_input(ui.ask("请选择是否立即安装", "N"))
     if ans.lower() not in ("y", "yes", "是"):
         return None
     return _install_pending()
@@ -344,10 +344,9 @@ def cmd_update(spec, args) -> int:
     # ---- 确认 ----
     if not args.yes:
         if p["beta_available"]:
-            q = (f"有公测版可用（{p['remote']}），是否更新？"
-                 "公测版可能不稳定 (Y/N)")
+            q = f"请选择是否更新到公测版 {p['remote']}"
         else:
-            q = f"是否更新到 {p['remote']}？(Y/N)"
+            q = f"请选择是否更新到 {p['remote']}"
         ans = ui.clean_input(ui.ask(q, "N"))
         if ans.lower() not in ("y", "yes", "是"):
             ui.info("已取消更新")
@@ -601,7 +600,7 @@ def cmd_tools() -> int:
     if missing:
         ui.sep()
         ui.info(f"缺失 {missing} 个工具。{tool_paths.repair_hint()}")
-        ui.info(f"全量包: {tool_paths.download_hint()}")
+        ui.info(f"{tool_paths.package_note()}: {tool_paths.download_hint()}")
         # 打包版里写「python main.py」是错的 —— 用户没有 Python，也没有 .py
         # repair_hint 已经把「让程序自己下」那条说了，这里只说剩下的两条路
         ui.detail(f"或 --tools-dir <目录>（{_self_invocation()}）")
@@ -963,9 +962,8 @@ def interactive(args) -> int:
         if not sess.analyzed:
             # 步骤 1：先分析，不分析就不给提取/重建 —— 避免用户在没识别之前乱按
             ui.info(f"目标: {sess.target}")
-            ui.detail("先分析目标，再决定做什么")
             items = menu_flow.pre_analyze_options()
-            idx = ui.menu("请选择:", [label for label, _k in items])
+            idx = ui.menu("请选择操作选项", [label for label, _k in items])
             act = items[idx][1]
 
             if act == menu_flow.EXIT:
@@ -985,18 +983,16 @@ def interactive(args) -> int:
                 sess.engine_key = det.engine
                 sess.engine_name = det.name
                 sess.analyzed = True
-                ui.ok(menu_flow.result_banner(sess, det))
             continue
 
         # 步骤 2：分析完，按引擎能力给菜单
         ui.info(menu_flow.result_banner(sess, det))
         ui.info(f"输出目录: {setup_ini.describe()}")
         if menu_flow.channel_switchable(sess.effective_engine):
-            ui.info(f"拆包通道: {menu_flow.channel_label(sess)}"
-                    f" —— {menu_flow.channel_detail(sess)}")
+            ui.info(f"拆包通道: {menu_flow.channel_label(sess)}")
 
         items = menu_flow.main_options(sess)
-        idx = ui.menu("请选择接下来的操作:", [label for label, _k in items])
+        idx = ui.menu("请选择操作选项", [label for label, _k in items])
         act = items[idx][1]
 
         if act == menu_flow.EXIT:
@@ -1055,7 +1051,7 @@ def _analyze(sess):
 def _menu_extract(sess) -> None:
     ui.sep()
     items = menu_flow.extract_options(sess)
-    idx = ui.menu("提取什么:", [label for label, _k in items])
+    idx = ui.menu("请选择提取内容选项", [label for label, _k in items])
     key = items[idx][1]
     if key == "back":
         return
@@ -1067,10 +1063,8 @@ def _menu_extract(sess) -> None:
 
 def _menu_repair(sess) -> None:
     ui.sep()
-    for line in menu_flow.REPAIR_WARNING.split("\n"):
-        ui.warn(line)
     items = menu_flow.repair_options()
-    idx = ui.menu("请选择修复模式:", [label for label, _k in items])
+    idx = ui.menu("请选择修复方式选项", [label for label, _k in items])
     mode = items[idx][1]
     if mode == "back":
         return
@@ -1081,10 +1075,9 @@ def _menu_repair(sess) -> None:
 
 def _menu_channel(sess) -> None:
     ui.sep()
-    ui.info(f"当前通道: {menu_flow.channel_label(sess)}"
-            f"（{menu_flow.channel_detail(sess)}）")
+    ui.info(f"当前通道: {menu_flow.channel_label(sess)}")
     items = menu_flow.channel_options(sess)
-    idx = ui.menu("切换拆包通道:", [label for label, _k in items])
+    idx = ui.menu("请选择拆包通道选项", [label for label, _k in items])
     action = items[idx][1]
     if action == "back":
         return
@@ -1094,14 +1087,12 @@ def _menu_channel(sess) -> None:
     elif action == "switch_third":
         sess.want_self = False
     ui.ok(f"通道: {menu_flow.channel_label(sess)}")
-    ui.detail("之后的提取/重建都会带上 "
-              + ("--experimental --self" if sess.want_self else "--experimental"))
 
 
 def _menu_more(sess, args) -> None:
     ui.sep()
     items = menu_flow.more_options(sess)
-    idx = ui.menu("更多选项:", [label for label, _k in items])
+    idx = ui.menu("请选择更多选项", [label for label, _k in items])
     action = items[idx][1]
     if action == "back":
         return
@@ -1174,7 +1165,7 @@ def _menu_engine(sess) -> None:
     from me.engines.menu import build_engine_menu
     items = build_engine_menu()
     ui.sep()
-    idx = ui.menu("指定引擎（-e）:", [label for label, _key in items])
+    idx = ui.menu("请选择引擎选项", [label for label, _key in items])
     label, key = items[idx]
     sess.forced = key or ""
     if key:
@@ -1190,7 +1181,7 @@ def _warn_missing_tools() -> None:
     if missing:
         ui.warn(f"外部工具缺失: {', '.join(missing)}")
         ui.detail(tool_paths.repair_hint())
-        ui.detail(f"全量包: {tool_paths.download_hint()}")
+        ui.detail(f"{tool_paths.package_note()}: {tool_paths.download_hint()}")
 
 
 # ------------------------------------------------------------------ 工具

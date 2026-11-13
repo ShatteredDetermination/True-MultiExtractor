@@ -43,11 +43,11 @@ FIX = "fix"              # --fix      先重建再提取
 
 # 提取分类（菜单顺序）
 EXTRACT_ITEMS: Tuple[Tuple[str, Optional[set]], ...] = (
-    ("提取图片", {"image"}),
-    ("提取音频", {"audio"}),
-    ("提取文本", {"text"}),
-    ("提取字体", {"font"}),
-    ("提取全部", None),
+    ("图片", {"image"}),
+    ("音频", {"audio"}),
+    ("文本", {"text"}),
+    ("字体", {"font"}),
+    ("全部", None),
 )
 
 REPAIR_ENGINES = ("gamemaker",)
@@ -133,7 +133,7 @@ def result_banner(session: Session, det=None) -> str:
 # ---------------------------------------------------------------- 菜单
 def pre_analyze_options() -> List[Tuple[str, str]]:
     return [
-        ("分析目标（--detect）", ANALYZE),
+        ("分析", ANALYZE),
         ("更换路径", PATH),
         ("退出", EXIT),
     ]
@@ -141,16 +141,16 @@ def pre_analyze_options() -> List[Tuple[str, str]]:
 
 def main_options(session: Session) -> List[Tuple[str, str]]:
     """分析完成后的主菜单：按引擎能力动态生成。"""
-    items: List[Tuple[str, str]] = [("提取资源（--extract）", EXTRACT)]
+    items: List[Tuple[str, str]] = [("提取资源", EXTRACT)]
     key = session.effective_engine
     if repair_supported(key):
-        items.append(("修复/重建 data.win（--rebuild / --repair）", REPAIR_MENU))
+        items.append(("修复重建", REPAIR_MENU))
     if channel_switchable(key):
-        items.append((f"切换拆包通道（当前: {channel_label(session)}）", CHANNEL_MENU))
+        items.append(("切换拆包通道", CHANNEL_MENU))
     items += [
         ("识别详情", DETAIL),
         ("更换路径", PATH),
-        ("更多选项（不解容器 / 中间产物 / 自检 / 配置 / 版本）", MORE),
+        ("更多选项", MORE),
         ("退出", EXIT),
     ]
     return items
@@ -166,32 +166,24 @@ def extract_options(session: Session) -> List[Tuple[str, str]]:
 
 def repair_options() -> List[Tuple[str, str]]:
     return [
-        ("全量重建（推荐：重建 AST 结构，彻底洗白混淆，文件长度会变）", REBUILD),
-        ("原位补丁（保守：仅修补越界指针，文件长度不变）", PATCH),
-        ("先重建再提取（--fix：重建后直接跑一遍提取）", FIX),
-        ("取消返回", "back"),
+        ("全量重建", REBUILD),
+        ("原位补丁", PATCH),
+        ("先重建再提取", FIX),
+        ("返回", "back"),
     ]
-
-
-REPAIR_WARNING = (
-    "修复/重建功能仅适用于**损坏的 GameMaker data.win** 文件。\n"
-    "普通游戏不需要它；重建会改变文件长度，请先用备份试。"
-)
 
 
 def channel_options(session: Session) -> List[Tuple[str, str]]:
     key = session.effective_engine
     cap = channel.capability(key or "")
     now = channel_label(session)
-    third = f"第三方工具（{cap.third_name or cap.third}）"
-    self_ = f"自研核心（{cap.self_name}）"
     to_self = "switch_self"
     to_third = "switch_third"
     items: List[Tuple[str, str]] = []
     if now != "自研":
-        items.append((f"切换到 {self_} —— 不依赖外部 CLI", to_self))
+        items.append(("自研通道", to_self))
     if now != "第三方":
-        items.append((f"切换到 {third}", to_third))
+        items.append(("第三方通道", to_third))
     items.append(("返回", "back"))
     return items
 
@@ -200,11 +192,11 @@ def more_options(session: Session) -> List[Tuple[str, str]]:
     return [
         (f"不解容器 [{'开' if session.no_deep else '关'}]", "toggle_deep"),
         (f"保留中间产物 [{'开' if session.keep_work else '关'}]", "toggle_work"),
-        (f"指定引擎（-e，当前: {engine_label(session)}）", "engine"),
-        ("工具自检（--tools）", "tools"),
-        ("引擎列表（--engines）", "engines"),
-        ("配置（--setup）", "setup"),
-        ("版本（--version）", "version"),
+        ("指定引擎", "engine"),
+        ("工具自检", "tools"),
+        ("引擎列表", "engines"),
+        ("配置", "setup"),
+        ("版本", "version"),
         ("返回", "back"),
     ]
 

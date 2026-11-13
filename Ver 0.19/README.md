@@ -378,7 +378,11 @@ python main.py "D:\Games\SomeGacha"
 
 两种发布形态均支持：`.dat` 数据文件形态、单文件 exe 形态。
 
-#### MFA 导出（V0.19 开发中）
+#### MFA 导出（V0.19 实验性，仅命令行）
+
+> 实验性通道，只有命令行入口（菜单里还没接）。这里只说做过的事 —— 结构自洽、
+> 真样本逐字节回环、能被独立解析器读回 —— **没有在 Fusion 2.5 里打开过**，不承诺能打开。
+> 最小的测试件是 `_out/fusion-test/min-object.mfa`（194,487 B，3 个对象）。
 
 目标是把成品反编译成 `Fusion 2.5` 能打开的 `.mfa` 工程。目前分两条路：
 
@@ -386,13 +390,20 @@ python main.py "D:\Games\SomeGacha"
 应用设置 + 菜单区 + 全局量区 + 帧偏移表 + 帧头部 + 对象 chunk 列表，
 在 `Template.mfa`（193,891 B）与 `Platformer Engine.mfa`（423,160 B）上
 `build_project(read_project(raw)) == raw`，**整份逐字节重建**。
-**自研转换已经能出 mfa（资源级）**：拿一份骨架 mfa（`--mfa-template`），
-把成品里的工程名 / 作者 / 版权与**整库图像**搬进去，写出来的文件能被自己的
-解析器完整读回（写前先自检）。
+**自研转换需要一个骨架 mfa**：`--mfa-template PATH` 或者环境变量 `ME_MFA_TEMPLATE`，
+随便一份 Fusion 2.5 工程（新建一个空白工程存盘就行）都可以当骨架。
+没给骨架时 `--mfa` 会走第三方工具（没配工具就是退出码 4），这条没变。
 
 ```bat
-set ME_MFA_TEMPLATE=D:\拆包教程素材\Clickteam MFA 样本\Template.mfa
+:: 自研通道：成品 + 骨架 → mfa（帧名 / 宽高 / 滚动区 / 图层都取自成品）
+set ME_MFA_TEMPLATE=D:\骨架.mfa
 MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
+
+:: 再把对象定义与实例位置也写进去（实验性，占位数据见下）
+MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa --mfa-objects
+
+:: 写完当场体检（结构自洽 + 逐字节回环）
+MultiExtractorCLI.exe --mfa-check D:\out\Game.mfa
 ```
 
 实测：`dtlg-v1.1.0.exe` → **1,515/1,515 张图像、7,094,120 B、4 秒**，
@@ -406,16 +417,17 @@ MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
 flags 统一写 1=可见：CCN 那一格读出来是 0，含义还没定）；实测 31 帧共 39 层，
 `dtlg team presents` 是 `Main` + `Effects` + `Top` 三层。
 
-**对象与实例要显式打开**：默认产物仍是骨架空帧（`--mfa` 不加参数）；加
-`--mfa-objects` 会把成品的对象定义与 1,562 条实例位置写进帧体 —— 但对象是**占位**：
-只有类型 / 名字 / 图标，Active 没动画、Counter 没外观，扩展对象（类型 ≥ 32）不写；
-**String 的正文是真的**（从对象属性段里取出来，实测 96 个 String 里取到 61 段，
-字体与颜色仍是默认值）；`--mfa-check` 现在还会用这套解析器把每一帧的对象列表读一遍，读不通就报问题；
+**对象与实例要显式打开**：不加 `--mfa-objects` 时帧体还是骨架自带的空帧（只有帧名 /
+宽高 / 滚动区 / 图层来自成品）；加上它才会把成品的对象定义与 1,562 条实例位置写进帧体。
+对象里**真的**是：类型 / 名字 / 图标 / 标志 / 8 个限定符 / 背景色 / 四字母标识
+（867 个对象的属性头全解）、**String 的正文**（96 个里取到 61 段，字体与颜色仍是默认值）、
+**Counter 的显示类型 / 宽高 / 14 张数字图**（25 个，初始值与颜色仍是默认值）。
+**不是真的**：Active 的动画表（没解出来）、Counter 的数值、扩展对象（类型 ≥ 32）的私有段 ——
+所以产物是「资源 + 摆位骨架」，**看不到原游戏的画面内容**，帧里也没有事件。
+`--mfa-check` 会用同一套解析器把每一帧的对象列表读一遍，读不通就报问题；
 写出来的帧体还能被按文档布局手写的**独立解析器**原样读回
-（1,249 个对象 / 1,249 条实例，名字与位置都对得上）；**Counter 的显示类型 / 宽高 /
-14 张数字图**也是从成品读的（25 个），初始值与颜色仍是默认值；对象的**标志 / 限定符 / 背景色 / 四字母标识**也是从属性段里读的
-（867 个对象全解出），不再是编出来的默认值。所以现在的产物是「资源 + 摆位骨架」，**看不到原游戏的画面内容**。
-命令行会当场把这些说清楚，文档里也一样写。
+（1,249 个对象 / 1,249 条实例，名字与位置都对得上）。命令行会当场把这些说清楚，
+文档里也一样写。
 
 产物旁边还会写一份 **`<名字>.mfa.json` 清单**：工程名/窗口/帧率、31 个帧名、
 867 个对象（序号 + 名字 + 类型号 + 标志）、各库条数，以及「哪些没做到」的说明。
@@ -434,6 +446,13 @@ MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
 工具没配、参数模板缺 `{in}` / `{out}`、超时、退出码非 0、产物不是 MFA，
 都会在返回值里写明原因，不会报「成功」。退出码：成功 `0`，找不到工具 `4`，
 工具跑了但没产出可用的 mfa `3`。
+
+**`--mfa-objects` 实测数字**（真样本，不是估的）：dtlg → `DustTale-demo-objects.mfa`
+**17,850,824 B**，31 帧全解、39 层、**1,249 个对象 / 1,249 条实例**读出（313 条扩展对象
+实例跳过）、61 段 String 正文、25 个 Counter 外观，`--mfa-check` 零问题。
+完整清单（含自测项数与已知缺口）见 `RELEASE-0.19E.md`。
+**没做到的**：Active 动画表、扩展对象私有段、事件树、第二份样本的 `flag=3` 密钥 ——
+所以产物是「资源 + 摆位骨架」，看不到原游戏的画面内容。
 
 ### Enigma Virtual Box
 
@@ -525,10 +544,11 @@ C:\Users\Administrator\Desktop\
 └── MultiExtractorDeveloping\   正在开发的版本就放这里（改版本号时同步一次）
 
 C:\MultiExtractor\
-├── Source Code\
-│   ├── Ver 0.16\           已发布版（= 原 0.15E，全量重建）
+├── GitHub\True-MultiExtractor\   推送用的 git 镜像（远端 ShatteredDetermination/True-MultiExtractor）
+│   ├── Ver 0.16\           已发布（= 原 0.15E，全量重建）
 │   ├── Ver 0.17\           已发布（0.17R）
-│   └── Ver 0.18\           已归档（0.18E 阶段的快照；0.18R 发行见 GitHub Release）
+│   ├── Ver 0.18\           已发布（0.18R）
+│   └── Ver 0.19\           当前线（0.19E 就在这个目录里）
 └── Compiled\
     ├── Ver 0.15\           最后一个用 python312 打出来的 exe 包
     └── Ver 0.17\           0.17R 的 exe 包（PyInstaller 6.22.3 / Python 3.14）

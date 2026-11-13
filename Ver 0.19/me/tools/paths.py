@@ -157,6 +157,17 @@ def download_hint() -> str:
     return mf.snapshot().full_package or mf.BUILTIN.full_package
 
 
+#: 全量包那一行为什么是老版本号：V0.18E 起主包改成 Slim，就不再出带 `tools/` 的包了。
+#: 最后一版真带外部 CLI 的包是 V0.17R —— 地址写老版本是对的，别照版本号盲改。
+PACKAGE_NOTE = ("外部工具全量包（V0.18E 起主包是 Slim，不再带 tools/；"
+                "最后一版是 V0.17R）")
+
+
+def package_note() -> str:
+    """全量包提示的前半句（与 `download_hint()` 一起打印）。"""
+    return PACKAGE_NOTE
+
+
 def status() -> List[Tuple[str, Optional[Path], str, str]]:
     """`--tools` 用：(键, 实际路径, 说明, 期望相对路径)。"""
     out = []
