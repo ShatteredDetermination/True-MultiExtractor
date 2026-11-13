@@ -1066,20 +1066,25 @@ def _menu_extract(sess) -> None:
 
 
 def _menu_mfa(sess) -> None:
-    """导出 mfa：问输出路径、骨架，然后走 --mfa 同一条路。"""
+    """导出 mfa：骨架找得到就直接用，找不到才问一次。"""
     ui.sep()
+    from me.formats.ctf25 import skeleton
+
     stem = Path(sess.target).stem
     default_out = str(setup_ini.output_root() / f"{stem}.mfa")
     out = ui.clean_input(ui.ask("mfa 输出路径", default_out))
     if not out:
         return
 
-    tpl = os.environ.get("ME_MFA_TEMPLATE", "")
+    found = skeleton.find()
+    tpl = ui.clean_input(ui.ask("骨架 mfa 路径", str(found) if found else ""))
     if not tpl:
-        tpl = ui.clean_input(ui.ask("骨架 mfa 路径", ""))
-    if not tpl:
-        ui.warn("需要骨架 mfa")
+        ui.warn("没有骨架 mfa")
         return
+    if not skeleton._valid(Path(tpl).expanduser()):
+        ui.warn("不是 mfa 文件")
+        return
+    skeleton.remember(tpl)
 
     ans = ui.clean_input(ui.ask("请选择是否写入对象与实例", "N"))
     objects = ans.lower() in ("y", "yes", "是")

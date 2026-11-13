@@ -2389,3 +2389,16 @@ dtlg-v1.1.0.exe 上逐帧 7 个 flag=3 块全部解开（解出长度与块头�
    工程名 `DustTale: Last Genocide`，清单写在同目录 `.mfa.json`。
 4）自测：test_cli_menu 160 项全过（新增 F2 段验 mfa 参数拼装；
    CTF 菜单断言里加了 `mfa`，GameMaker/Godot 断言没有）。
+
+0.19WIP Beta 00138（第 37 轮·续二）：骨架 mfa 只问一次，之后记在 mfa.ini
+1）新模块 `me/formats/ctf25/skeleton.py`：`candidates()` 按「环境变量 ME_MFA_TEMPLATE →
+   mfa.ini 里记的路径 → 程序目录 / resources / 桌面 / 文档里的 *.mfa」找骨架，
+   只认开头是 `MFU2` 且 ≤ 50 MB 的文件；`remember()` 把用过的路径写进 `mfa.ini`。
+2）`main._menu_mfa()` 改成：先 `skeleton.find()`，找到就把它当默认值填进
+   「骨架 mfa 路径 [路径]:」，回车即用；填的不是 mfa 就给 `[warn] 不是 mfa 文件` 并返回。
+   原先那句让人莫名其妙的 `[warn] 需要骨架 mfa` 没了 —— 现在只在真没有骨架时说
+   `[warn] 没有骨架 mfa`。
+3）`mfa.ini` 是本机配置：`make_release.py` 打包前会删它，仓库 `.gitignore` 也加了 `mfa.ini`。
+4）实测：第一次手填 `C:\拆包教程素材\Clickteam MFA 样本\Template.mfa` → 写出
+   139,235,427 B 的 mfa；再跑一遍，提示行默认值已是那个路径，回车就过。
+5）自测：test_cli_menu 160 项、test_softkey 80 项、test_mfa_build 120 项全过。

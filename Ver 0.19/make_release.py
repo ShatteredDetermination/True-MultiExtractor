@@ -40,6 +40,7 @@ PURGE_DIRS = (
 # 单独删掉的文件
 PURGE_FILES = (
     "setup.ini",
+    "mfa.ini",          # 骨架 mfa 的路径（本机配置，不该跟着发布包走）
 )
 
 # 不打包进发布 zip 的东西

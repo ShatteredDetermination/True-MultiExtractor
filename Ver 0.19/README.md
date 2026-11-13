@@ -394,6 +394,10 @@ python main.py "D:\Games\SomeGacha"
 随便一份 Fusion 2.5 工程（新建一个空白工程存盘就行）都可以当骨架。
 没给骨架时 `--mfa` 会走第三方工具（没配工具就是退出码 4），这条没变。
 
+菜单里只问一次：填过的路径记在程序目录的 `mfa.ini`（`[MFA] template=`），
+下次提示行直接带默认值，回车就用它；`ME_MFA_TEMPLATE` 优先级最高。
+也可以把骨架 mfa 放在程序目录、`resources\`、桌面或文档里，会被自动列出。
+
 ```bat
 :: 自研通道：成品 + 骨架 → mfa（帧名 / 宽高 / 滚动区 / 图层都取自成品）
 set ME_MFA_TEMPLATE=D:\骨架.mfa

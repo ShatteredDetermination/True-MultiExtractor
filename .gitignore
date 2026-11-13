@@ -31,3 +31,7 @@ tools/_download/
 .vs/
 .vscode/
 *.user
+
+# 本机配置：骨架 mfa 的路径（mfa.ini）
+Ver */mfa.ini
+mfa.ini
