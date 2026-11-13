@@ -825,31 +825,26 @@ def cmd_mfa(target, args) -> int:
             reason = f"自研通道失败：{exc}"
             ui.warn(reason)
         else:
-            ui.ok(f"已导出 mfa（资源级）: {rep.out}（{rep.out_size:,} B）")
-            ui.detail(rep.summary())
-            ui.detail(f"工程名: {rep.app_name!r}")
-            if rep.fps:
-                ui.detail(f"帧率 {rep.fps}，应用头写 {rep.app_frames} 帧")
+            ui.ok(f"已导出: {rep.out}")
+            ui.detail(f"大小 {rep.out_size:,} B")
+            ui.detail(f"名称 {rep.app_name}")
+            ui.detail(f"帧 {rep.frames}")
+            ui.detail(f"图像 {rep.images_written}/{rep.images_total}")
+            if rep.sounds_total:
+                ui.detail(f"音频 {rep.sounds_written}/{rep.sounds_total}")
+            if rep.fonts_total:
+                ui.detail(f"字体 {rep.fonts_written}/{rep.fonts_total}")
+            if rep.icons:
+                ui.detail(f"图标 {rep.icons}")
             if rep.objects:
-                kinds = " / ".join(f"类型 {k}×{v}"
-                                  for k, v in list(rep.object_types.items())[:3])
-                ui.detail(f"对象 {rep.objects} 个（对象头 "
-                          f"{rep.object_headers_size} B，每条 "
-                          f"{rep.object_headers_size // max(rep.objects, 1)} B）"
-                          + (f"；{kinds}" if kinds else ""))
-            for note in rep.notes[:3]:
-                ui.detail(f"跳过: {note}")
+                ui.detail(f"对象 写入 {rep.objects_written}/{rep.objects}")
+                ui.detail(f"实例 写入 {rep.instances_written}")
+            if rep.frames_decoded < rep.frames:
+                ui.warn(f"帧头 {rep.frames_decoded}/{rep.frames}")
+            if rep.instances_skipped:
+                ui.warn(f"实例跳过 {rep.instances_skipped}")
             if rep.manifest:
-                ui.detail(f"清单: {rep.manifest}")
-            if rep.objects_written:
-                ui.detail(f"占位对象 {rep.objects_written} 个、实例 "
-                          f"{rep.instances_written} 条"
-                          f"（跳过 {rep.instances_skipped} 条扩展对象）")
-                ui.warn("对象是占位：只有类型/名字/图标，Active 没有动画、"
-                        "String 没有文字、Counter 没有外观；事件还没有重建。")
-            else:
-                ui.warn("帧内对象与事件还没有重建，帧是骨架自带的空帧；"
-                        "原游戏布局不会出现在这份 mfa 里。")
+                ui.detail(f"清单 {rep.manifest}")
             events.emit("mfa", ok=True, channel="self", reason="ok",
                         out=rep.out, size=rep.out_size,
                         images=rep.images_written, images_total=rep.images_total,
@@ -1090,7 +1085,7 @@ def _menu_mfa(sess) -> None:
         return
     skeleton.remember(tpl)
 
-    ans = ui.clean_input(ui.ask("请选择是否写入对象与实例", "N"))
+    ans = ui.clean_input(ui.ask("请选择是否写入对象与实例", "Y"))
     objects = ans.lower() in ("y", "yes", "是")
     argv = menu_flow.build_mfa_argv(sess, out, tpl, objects)
     ui.detail("执行: " + " ".join(argv))

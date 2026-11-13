@@ -453,6 +453,26 @@ MultiExtractorCLI.exe "D:\Games\Game.exe" --mfa D:\out\Game.mfa
 都会在返回值里写明原因，不会报「成功」。退出码：成功 `0`，找不到工具 `4`，
 工具跑了但没产出可用的 mfa `3`。
 
+导出后的输出是「字段 值」一行一条，没有句子：
+
+```text
+[ok] 已导出: ...\Undertale Last Breath Scrapped.mfa
+     大小 64,617,572 B
+     名称 Undertale Last Breath - [Scrapped]
+     帧 13
+     图像 2138/2138
+     音频 68/68
+     字体 5/5
+     图标 1
+     对象 写入 0/275
+     实例 写入 0
+[warn] 帧头 0/13
+     清单 ...\Undertale Last Breath Scrapped.mfa.json
+```
+
+`[warn] 帧头 0/13` 就是「13 帧一帧都没解开」；`对象 写入 0/275` 是「对象表读到 275 条、
+一条也没写进帧体」。为什么没写、哪一块跳过，全部记在同名 `.json` 清单里，不往屏幕上堆句子。
+
 **`--mfa-objects` 实测数字**（真样本，不是估的）：dtlg → `DustTale-demo-objects.mfa`
 **17,850,824 B**，31 帧全解、39 层、**1,249 个对象 / 1,249 条实例**读出（313 条扩展对象
 实例跳过）、61 段 String 正文、25 个 Counter 外观，`--mfa-check` 零问题。
